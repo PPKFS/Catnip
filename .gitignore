@@ -1,0 +1,10 @@
+.stack-work/
+Catnip.cabal
+*~
+dist/*
+app/*
+.ghc.*
+.vscode/*
+ChangeLog.md
+stack.yaml.lock
+test/*
