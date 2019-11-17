@@ -10,11 +10,29 @@ import qualified Data.Map.Strict as Map
 import Control.Lens
 import Common
 
-
-
 -- TODO: add a properly random way to generate IDs
 randomList :: T.Text
 randomList = "f6h3"
+
+lengthNameID :: Int
+lengthNameID = 4
+
+mkID :: Name -> ID
+mkID n = (T.take lengthNameID n) `T.append` randomList
+
+makeObject :: Name -> (a -> Object a)
+makeObject n = Object (mkID n) n ImproperNamed SingularNamed 
+        (getIndefiniteArticle ImproperNamed SingularNamed (T.head n))
+
+-- | if we need to make an indefinite article by default
+getIndefiniteArticle :: NameProperness -> NamePlurality -> Char -> T.Text
+getIndefiniteArticle properness plurality beginning = 
+    case properness of
+    ProperNamed -> ""
+    ImproperNamed -> 
+        case plurality of
+            PluralNamed -> "some"
+            SingularNamed -> if' (elem beginning ['a', 'e', 'i', 'o', 'u']) "an" "a"
 
 class HasType a where
     objectType :: a -> ObjectType
@@ -25,17 +43,8 @@ instance Show (Object x) where
               i = c ^. objID
               a = c ^. name
               
-lengthNameID :: Int
-lengthNameID = 4
-
-mkID :: Name -> ID
-mkID n = (T.take lengthNameID n) `T.append` randomList
-
-defaultObject :: Name -> (a -> Object a)
-defaultObject n = Object (mkID n) n ImproperNamed SingularNamed
-
 direction :: Name -> Opposite -> Direction
-direction n opp = set objID n $ defaultObject n opp
+direction n opp = set objID n $ makeObject n opp
 
 instance HasType Direction where
     objectType _ = "direction"
@@ -57,7 +66,7 @@ constructDirections = Map.fromList [(n ^. name, n) |(a, b) <-
 
 --    ROOM STUFF --
 room :: Name -> Description -> Room
-room n desc = defaultObject n $ RoomData desc Lighted Unvisited Map.empty Nothing
+room n desc = makeObject n $ RoomData desc Lighted Unvisited Map.empty Nothing
 
 nowhereRoom :: Room
 nowhereRoom = (room "Nowhere, The Void, You Screwed Up" "If you're here, you've messed up something chronic.") 
@@ -70,7 +79,7 @@ instance HasType GenericThing where
     objectType _ = "thing"
 
 defaultThing :: Name -> Description -> (a -> Thing a)
-defaultThing n d a = defaultObject n $ ThingData d (\w -> nowhereRoom) "" 
+defaultThing n d a = makeObject n $ ThingData d (\w -> nowhereRoom) "" 
     Lit Inedible Portable Unwearable NotPushableBetweenRooms Unhandled Described Mentioned UnmarkedForListing a
 genericThing :: Name -> Description -> GenericThing
 genericThing n d = defaultThing n d ()
@@ -99,4 +108,3 @@ instance HasType Container where
 makeLenses ''ThingData
 makeLenses ''Rulebook
 makeLenses ''Rule
-makeLenses ''ActionData

@@ -9,6 +9,13 @@ import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Control.Lens
 import Control.Monad.State
+import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Terminal
+import System.IO
+
+if' :: Bool -> a -> a -> a
+if' True  x _ = x
+if' False _ y = y
 
 type DirectionMap = Map.Map ID Direction
 type ID = T.Text
@@ -27,6 +34,7 @@ data Object a = Object
         _name :: Name,
         _nameProperness :: NameProperness,
         _namePlurality :: NamePlurality,
+        _indefiniteArticle :: T.Text,
         _info :: a
     }
 makeLenses ''Object
@@ -45,11 +53,10 @@ data RoomData = RoomData
         _mapConnections :: MapConnections,
         _containingRegion :: Maybe ID
     } deriving Show
+
 type Room = Object RoomData
 type RoomMap = Map.Map ID Room
 
-emptyRoom :: Room
-emptyRoom = Object "" "" ImproperNamed SingularNamed $ RoomData "" Lighted Unvisited Map.empty Nothing
 type Region = Object ()
 
 -- THINGS --
@@ -65,6 +72,37 @@ data Pushable = PushableBetweenRooms | NotPushableBetweenRooms deriving Show
 
 type InitialAppearance = T.Text
 type Location = Room
+
+data Capitalisation = Capital | NotCapital
+data Definitive = Definite | Indefinite
+data PrintingOptions = PrintingOptions Capitalisation Definitive
+
+data ActionData a = ActionData
+    {
+        _currentActor :: World -> GenericThing,
+        _actionVariables :: a
+    }
+
+data Action a = Action
+    {
+        _actionName :: Name,
+        _checkRules :: Maybe (Rulebook (ActionData a)),
+        _carryOutRules :: Rulebook (ActionData a),
+        _reportRules :: Maybe (Rulebook (ActionData a)),
+        -- | given a world, set the initial values of whatever the action variables is
+        _actionData :: ActionData a,
+        _setActionVariables :: Maybe (World -> ActionData a -> a)
+    }
+
+data World = World 
+    {
+        _directions :: DirectionMap,
+        _rooms :: RoomMap,
+        _title :: T.Text,
+        _rulebooks :: Map.Map Name (World -> (RuleOutcome, World)),
+        _msgBuffer :: MsgBuffer,
+        _printActivity :: Action ()
+    }
 
 data ThingData a = ThingData {
     _description :: Description,
@@ -85,27 +123,17 @@ type Thing a = Object (ThingData a)
 
 type GenericThing = Thing ()
 
-data World = World 
+data MsgBuffer = MsgBuffer
     {
-        _directions :: DirectionMap,
-        _rooms :: RoomMap,
-        _title :: T.Text,
-        _rulebooks :: Map.Map Name (World -> (RuleOutcome, World)),
-        _msgBuffer :: T.Text,
-        _actionVariables :: ActionData,
-        _actions :: Map.Map Name ActionData
+        _indentLvl :: Int,
+        _stdBuffer :: [Doc AnsiStyle],
+        _dbgBuffer :: [Doc AnsiStyle], -- this one is sent to stderr
+        _msgStyle :: Maybe AnsiStyle
     }
 
 type RuleOutcome = Maybe Bool
 type WorldUpdate a b = State (World, a) b
 type WorldRuleState a = WorldUpdate a RuleOutcome
-
-
-data ActionData = ActionData
-    {
-    _actionName :: Name,
-    _currentActor :: World -> GenericThing
-    }
 
 -- | WorldRuleState is a state processor; you feed it (World, PotentiallyParameters)
 -- | and get out (Result, (PotentiallChangedWorld, PotentiallyChangedParameters))
@@ -126,4 +154,6 @@ data Rulebook a = Rulebook
     }
 makeLenses ''World
 makeLenses ''RoomData
-
+makeLenses ''MsgBuffer
+makeLenses ''Action
+makeLenses ''ActionData
