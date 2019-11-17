@@ -1,5 +1,4 @@
 .stack-work/
-Catnip.cabal
 *~
 dist/*
 app/*
