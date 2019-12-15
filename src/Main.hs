@@ -12,34 +12,53 @@ import Control.Monad.State
 import Objects
 import Rulebooks
 import Actions
-import Common
+import Types
 import System.IO
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 
-constructRulebooks :: Map.Map Name (World -> (RuleOutcome, World))
-constructRulebooks = Map.fromList [ addRulebook whenPlayBeginsRules]
-        --addRulebook actionProcessingRules,
-        --addRulebook specificActionProcessingRules, addRulebook lookingCarryOutRules]
-    where 
-        addRulebook r = (r ^. rulebookName, runRulebook r)
---constructActions :: [ActionConstructor]
---constructActions = [makeLookingAction]
-
-constructWorld :: World
+constructWorld :: World UserObjects UserLibrary
 constructWorld = World
     {
         _directions = constructDirections,
         _rooms = Map.empty,
         _title = "Untitled Goose Game",
-        _rulebooks = constructRulebooks,
-        _msgBuffer = MsgBuffer { _indentLvl = 0, _stdBuffer = [], _dbgBuffer = [], _msgStyle = Nothing }
-        --_actions = Map.empty --Map.fromList $ map (\(y, z , _) -> (y, z)) x
+        _msgBuffer = MessageBuffer { _indentLvl = 0, _stdBuffer = [], _dbgBuffer = [], _msgStyle = Nothing },
+        _std = StandardLibrary {
+            _activities = constructActivities,
+            _actions = constructActions,
+            _rulebooks = constructRulebooks},
+        _objects = Map.empty
     }
 
+constructRulebooks :: RulebookCollection UserObjects UserLibrary
+constructRulebooks = RulebookCollection
+    {
+        _whenPlayBeginsRules = whenPlayBeginsRulesImpl
+    }
+
+constructActivities :: ActivityCollection UserObjects UserLibrary
+constructActivities = ActivityCollection
+    {
+        _printingDarkRoomNameActivity = printingDarkRoomNameActivityImpl,
+        _printingNameActivity = printingNameActivityImpl
+    }
+
+constructActions :: ActionCollection UserObjects UserLibrary
+constructActions = ActionCollection
+    {
+        _lookingAction = lookingActionImpl
+    }
+
+type UserLibrary = Int
+type UserObjects = ()
+type UserActions = Int
+
+instance HasLocation UserObjects where
+    getLocation _ _ = nowhereRoom
 main :: IO ()
 main = do
-    let (_, x) = runRulebook whenPlayBeginsRules constructWorld
-    putDoc $ fillCat $ reverse $ (x ^. msgBuffer . dbgBuffer)
-    putDoc $ fillCat $ reverse $ (x ^. msgBuffer . stdBuffer)
-    putStrLn $ ""
+    let (_, x) = runRulebook whenPlayBeginsRulesImpl constructWorld
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
+    putStrLn ""

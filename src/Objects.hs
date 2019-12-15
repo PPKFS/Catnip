@@ -1,14 +1,45 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TemplateHaskell #-}
+--{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Objects where
 
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Control.Lens
-import Common
+import Types
+import Utils
+import Data.Maybe
+
+lookupID :: World obj usr -> ID -> Maybe (Object obj)
+lookupID w i = Map.lookup i (w ^. objects)
+    
+class HasLocation a where
+    getLocation :: HasLocation obj => World obj usr -> a -> LocationObj obj
+
+instance HasLocation obj => HasLocation (Object obj) where
+    getLocation w o = getLocation w (o ^. info)
+
+instance HasLocation obj => HasLocation (ObjectInfo obj) where
+    getLocation w (Room x) = getLocation w x
+    getLocation w (Thing x) = getLocation w x
+    getLocation w (ExtInfo y) = getLocation w y
+
+instance HasLocation ID where
+    getLocation w i = case obj of
+                        Nothing -> nowhereRoom
+                        Just x -> getLocation w x
+                        where obj = lookupID w i
+
+instance HasLocation RoomData where
+    getLocation w rd = fromMaybe globalRegion $ rd ^. containingRegion >>= lookupID w
+    
+instance HasLocation ThingData where
+    getLocation w t = fromMaybe nowhereRoom (do
+        let x = t ^. location
+        lookupID w x)
 
 -- TODO: add a properly random way to generate IDs
 randomList :: T.Text
@@ -18,9 +49,9 @@ lengthNameID :: Int
 lengthNameID = 4
 
 mkID :: Name -> ID
-mkID n = (T.take lengthNameID n) `T.append` randomList
+mkID n = T.take lengthNameID n `T.append` randomList
 
-makeObject :: Name -> (a -> Object a)
+makeObject :: Name -> ObjectInfo obj -> Object obj
 makeObject n = Object (mkID n) n ImproperNamed SingularNamed 
         (getIndefiniteArticle ImproperNamed SingularNamed (T.head n))
 
@@ -32,10 +63,7 @@ getIndefiniteArticle properness plurality beginning =
     ImproperNamed -> 
         case plurality of
             PluralNamed -> "some"
-            SingularNamed -> if' (elem beginning ['a', 'e', 'i', 'o', 'u']) "an" "a"
-
-class HasType a where
-    objectType :: a -> ObjectType
+            SingularNamed -> if' (beginning `elem` ['a', 'e', 'i', 'o', 'u']) "an" "a"
 
 instance Show (Object x) where
     show c = T.unpack $ a `T.append` b
@@ -43,18 +71,13 @@ instance Show (Object x) where
               i = c ^. objID
               a = c ^. name
               
-direction :: Name -> Opposite -> Direction
-direction n opp = set objID n $ makeObject n opp
+direction :: Name -> Opposite -> DirectionObj obj
+direction n opp = set objID n $ makeObject n (Direction opp)
 
-instance HasType Direction where
-    objectType _ = "direction"
-
-opposite :: Direction -> Name -- this really should include the reader/state/thingy?
-opposite = view info
-directionPair :: Name -> Name -> (Direction, Direction)
+directionPair :: Name -> Name -> (DirectionObj obj, DirectionObj obj)
 directionPair d1 d2 = (direction d1 d2, direction d2 d1) -- since the id of a direction is just its name
 
-constructDirections :: DirectionMap
+constructDirections :: Map.Map ID (DirectionObj obj)
 constructDirections = Map.fromList [(n ^. name, n) |(a, b) <-
     [directionPair "north" "south",
      directionPair "west" "east",
@@ -65,46 +88,42 @@ constructDirections = Map.fromList [(n ^. name, n) |(a, b) <-
      n <- [a, b]]
 
 --    ROOM STUFF --
-room :: Name -> Description -> Room
-room n desc = makeObject n $ RoomData desc Lighted Unvisited Map.empty Nothing
+makeRoom :: Name -> Description -> RoomObj obj
+makeRoom n desc = makeObject n $ Room (RoomData desc Lighted Unvisited Map.empty Nothing)
 
-nowhereRoom :: Room
-nowhereRoom = (room "Nowhere, The Void, You Screwed Up" "If you're here, you've messed up something chronic.") 
+nowhereRoom :: (RoomObj obj)
+nowhereRoom = (makeRoom "Nowhere, The Void, You Screwed Up" "If you're here, you've messed up something chronic.") 
                 { _objID = "0xDEADBEEF"} 
 
-instance HasType Room where
-    objectType _ = "room"
+globalRegion :: ThingObj obj
+globalRegion = set objID "GLOBAL_REGION" $ makeObject "global region" Region
 
-instance HasType GenericThing where
-    objectType _ = "thing"
+penID = "test"
+blankActionData = ActionData { _currentActor = penID}
 
-defaultThing :: Name -> Description -> (a -> Thing a)
-defaultThing n d a = makeObject n $ ThingData d (\w -> nowhereRoom) "" 
-    Lit Inedible Portable Unwearable NotPushableBetweenRooms Unhandled Described Mentioned UnmarkedForListing a
-genericThing :: Name -> Description -> GenericThing
-genericThing n d = defaultThing n d ()
+makeThing :: Name -> Description -> ThingObj obj
+makeThing n d = makeObject n $ Thing (ThingData d (nowhereRoom ^. objID) "" 
+    Lit Inedible Portable Unwearable NotPushableBetweenRooms Unhandled Described Mentioned UnmarkedForListing)
 
-pen :: GenericThing
-pen = genericThing "Bic pen" "just a pen"
-
-type OtherSide = ID
-data Openable = Openable | Unopenable
-data Open = Open | Closed
-data DoorData = DoorData OtherSide Open Openable
-type Door = Thing DoorData
-
-instance HasType (Thing DoorData) where
-    objectType _ = "door"
+pen :: ThingObj obj
+pen = makeThing "Bic pen" "just a pen"
 
 data Enterable = Enterable | NotEnterable
 data Opaqueness = Opaque | Transparent
 type CarryingCapacity = Int
 data ContainerData = ContainerData Opaqueness Enterable Open Openable
-type Container = Thing ContainerData
 
-instance HasType Container where
-    objectType _ = "container"
 
-makeLenses ''ThingData
-makeLenses ''Rulebook
-makeLenses ''Rule
+-- we start by reading the first 2 characters of the id, which gives us some kind of lookup table as to which record
+-- field we want
+--stdActions :: Functor f => (ActionCollection -> f (ActionCollection)) -> BaseWorld usr-> f (BaseWorld)
+--stdActions = std . actions
+--decodeID :: [Char] -> World usr -> (ID -> AnyObject obj)
+--decodeID (x1:[x2]) w = undefined --case lookuptable of
+    --Just x -> (\id -> Map.lookup id x)
+    --Nothing -> (\id -> StdObj (Error pen))
+    --where lookuptable =  Map.lookup (x1, x2) $ w ^. idTable
+    
+--objGet :: ID -> World usr -> AnyObject obj
+--objGet id world = lookupTable id
+--    where lookupTable = decodeID (T.unpack (T.take 2 id)) world

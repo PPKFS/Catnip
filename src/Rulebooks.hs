@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TemplateHaskell #-}
+--{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Rulebooks where
 
@@ -11,255 +12,202 @@ import Control.Lens
 import Objects
 import Control.Monad.State
 import Control.Monad
-import Common
+import Types
+import Utils
+import SayCommon
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
+import Data.Maybe
 
--- | a version of modify that just ignores any rulebook variables
-modifyWorld :: (a -> a) -> State (a, b) ()
-modifyWorld f = modify (\(w, a) -> (f w, a))
-
-instance Show (Rule a) where
-    show r = T.unpack $ r ^. ruleName
-
-instance Show (Rulebook a) where
-    show r = T.unpack $ r ^. rulebookName
-
-sayInt :: Doc AnsiStyle -> World -> World
-sayInt a w = w & msgBuffer . stdBuffer %~ ((:) $ apl a)
-                where apl = case (w ^. msgBuffer . msgStyle) of
-                        Nothing -> id
-                        Just x -> annotate x
-
-say :: T.Text -> World -> World
-say a w = sayInt (pretty a) w
-
-sayLn :: T.Text -> World -> World
-sayLn a = sayInt (pretty a <> line)
-
-sayDbgInt :: Doc AnsiStyle -> World -> World
-sayDbgInt a w = w & msgBuffer . dbgBuffer %~ ((:) $ (pretty (T.replicate (w ^. msgBuffer . indentLvl) " ") <> a))
-                where apl = case (w ^. msgBuffer . msgStyle) of
-                                Nothing -> id
-                                Just x -> annotate x
-
-sayDbg :: T.Text -> World -> World
-sayDbg a w = sayDbgInt (pretty a) w
-
-sayDbgLn :: T.Text -> World -> World
-sayDbgLn a = sayDbgInt (pretty a <> line)
-
-indentDbg :: World -> Bool -> World
-indentDbg w b = w & msgBuffer . indentLvl %~ ((+) $ (if b then 1 else (-1)) * 4)-- w2 & msgBuffer . stdBuffer %~ ((:) $ (w ^. msgBuffer . indentLvl, line)) where
-
-setStyle :: (Maybe AnsiStyle) -> World -> World
-setStyle s w= w & msgBuffer . msgStyle .~ s
--- | same as say, but prebaked to save having to modify sayLn 
-sayModify :: T.Text -> WorldUpdate b ()
-sayModify a = modifyWorld (say a)
-
-sayModifyLn :: T.Text -> WorldUpdate b ()
-sayModifyLn a = modifyWorld (sayLn a)
-
-sayModifyFormatted :: Doc AnsiStyle -> WorldUpdate b ()
-sayModifyFormatted a = modifyWorld (sayInt a)
-
-sayModifyLnFormatted :: Doc AnsiStyle -> WorldUpdate b ()
-sayModifyLnFormatted a = modifyWorld (sayInt $ a <> line)
-
-blankRulebook :: Name -> Rulebook a
+-- | smart constructor for rulebooks. Sets everything to just blank.
+blankRulebook :: Name -> Rulebook obj usr act 
 blankRulebook n = Rulebook { _rulebookName = n, _firstRules = [], _rules = [], _lastRules = [], _defaultOutcome = Nothing}
 
-type PlainRulebook = Rulebook ()
-plainRulebook :: Name -> PlainRulebook
-plainRulebook n = blankRulebook n
+-- | a rule that does nothing
+blankRule :: WorldRuleState obj usr act
+blankRule = return Nothing
 
-blankRule :: WorldRuleState a
-blankRule = do { return Nothing }
-
-runRuleset :: [Rule a] -> a -> World -> (RuleOutcome, (World, a))
+-- | internal use function ; run a list of rules
+runRuleset :: [Rule obj usr a] -> a -> World obj usr -> (RuleOutcome, (World obj usr, a))
 runRuleset [] a w = (Nothing, (w, a))
 runRuleset (r:rs) a w = case x of
     (Just True, _) -> x
     (Nothing, (w', a')) -> runRuleset rs a' w'
     where x = runState y (w, a)
-          y = (do { modifyWorld $ sayDbgLn ("Following the " `mappend` (r ^. ruleName)) ; (r ^. rule) })
+          y = if' ( r ^. ruleName /= "")
+            printFollowing
+            (r ^. ruleProcessor) where
+                printFollowing = do 
+                            modifyWorld $ sayDbgLn ("Following the " `mappend` (r ^. ruleName))
+                            r ^. ruleProcessor
 
-runRulebook :: PlainRulebook -> World -> (Maybe Bool, World)
+-- run some rulebook, that is expecting no additional information,
+runRulebook :: PlainRulebook obj usr -> World obj usr -> (Maybe Bool, World obj usr)
 runRulebook r w = (\(f, (w', _)) -> (f, w')) $ runRulebookInternally r () w
 
--- | so this is a pain to have to keep coming back to
--- we take a rulebook, some initial conditions, and a world
--- we then try each ruleset in turn until we get some answer
-runRulebookInternally :: Rulebook a -> a -> World -> (Maybe Bool, (World, a))
+-- | this is the meat of the rulebook code
+-- we take a rulebook, which we initialise with some data a
+-- we then iterate all 3 of its rulebooks, doing stuff if needbe
+-- if we hit a value other than nothing, we return and stop
+runRulebookInternally :: Rulebook obj usr a -> a -> World obj usr -> (Maybe Bool, (World obj usr, a))
 runRulebookInternally r x w = (res, (w2', a')) where
         (res, (w', a')) = iterateRulebooks [r ^. firstRules, r ^. rules, r ^. lastRules] a w2
         w1 = indentDbg w True
         a = x
-        w2 = sayDbgLn ("Following the " <> (r ^. rulebookName)) w1
-        w2' = indentDbg (w') False
-        iterateRulebooks :: [[Rule a]] -> a -> World -> (RuleOutcome, (World, a))
+        w2 = if' ( r ^. rulebookName /= "") 
+            (sayDbgLn ("Following the " <> (r ^. rulebookName)) w1)
+            w1
+        w2' = indentDbg w' False
+        iterateRulebooks :: [[Rule obj usr act]] -> act -> World obj usr -> (RuleOutcome, (World obj usr, act))
         iterateRulebooks [] a w = (r ^. defaultOutcome, (w, a))
         iterateRulebooks (x:xs) a w = case ro of
             (Just _, _) -> ro
             (Nothing, (w', a')) -> iterateRulebooks xs a' w'
             where ro = runRuleset x a w
--- | call a rulebook as a rule
 
 
--- | to abide by a rulebook and act as glue for its various action parameters 
--- this covers obvious things like current actors but also action variables to be passed
--- between rulebooks.
--- Rulebook -> (some way to convert the input argument) -> (some way to append 
--- our new mutated argument to the input argument) -> state)
-abideByRulebookWithArgs :: Rulebook a -> (b -> a) -> (a -> b -> b) -> (World, b) -> (RuleOutcome, (World, b))
-abideByRulebookWithArgs  rulebook convertIn convertOut (world, actionVars) = (result2, 
-    (world2, convertOut action2 actionVars)) where
-        (result2, (world2, action2)) = (runRulebookInternally rulebook (convertIn actionVars) world)
 
-abideByRulebook :: T.Text -> WorldRuleState a
-abideByRulebook r = do { state $ abideWrap r }
-
-abideWrap :: Name -> (World, a) -> (RuleOutcome, (World, a))
-abideWrap r (w, a) = (x, (w', a)) where
-    (x, w') = ((getRulebook w r) w)
-
-getRulebook :: World -> Name -> (World -> (RuleOutcome, World))
-getRulebook w n = case x of
-    Nothing -> runRulebook (plainRulebook "dummy rulebook")
-    Just r -> r
-    where x = Map.lookup n (w ^. rulebooks)
-
-introText :: World -> World
-introText = execState (do
-    w <- get
-    let shortBorder = "------" :: T.Text
-        totalLength = (2 * (T.length shortBorder)) + T.length (w ^. title) + 2 :: Int
-        longBorder = T.replicate totalLength "-" :: T.Text
-    modify $ (setStyle (Just (color Green <> bold)))
-    modify $ sayLn longBorder
-    w <- get
-    modify $ sayLn (shortBorder <> " " <> (w ^. title) <> " " <> shortBorder)
-    modify $ sayLn longBorder
-    modify $ sayLn "\n"
-    modify $ setStyle Nothing
-    return w)
-
-blankActionData = ActionData { _currentActor = \w -> pen }
-
--- | An action covers both inform actions and inform activities. I cannot work out what the difference really
--- is from the documentation, except that an action can be explicitly called upon by the player.
--- so for me, the only real difference is going to be parser-level stuff which I can wrap up
--- in a nice maybe. Like we have parameterised over rules and rulebooks and objects, we parameterise actions
--- to allow for action variables.
-
-type PlainAction = Action ()
-makeActivity :: Name -> [Rule (ActionData ())] -> PlainAction
+-- | more constructors of not much
+makeActivity :: Name -> [Rule obj usr (ActionData a)] -> Action obj usr a
 makeActivity name rules = Action { _actionName = name, _checkRules = Nothing, _reportRules = Nothing,
-_actionData = blankActionData, _setActionVariables = Nothing, _carryOutRules = (blankRulebook "") { _rules = rules }}
+    _actionInfo = blankActionData, _setActionVariables = Nothing, _carryOutRules = (blankRulebook name) 
+    { _rules = rules }}
 
--- | the main action processing rulebook. It requires some kind of input
--- to know what form of action is being processed right now.
-actionProcessingRules :: Rulebook (Action a)
+setActionVars :: World obj usr -> Action obj usr act-> Action obj usr act
+setActionVars w a = case setVar of
+                    Nothing -> a
+                    Just b -> a { _actionInfo = b w actionI } 
+                    where actionI = a ^. actionInfo
+                          setVar = a ^. setActionVariables
+
+-- | the main action processing rulebook. though I guess with haskell's laziness and everything,
+-- it's more of a function that doesn't take any parameters?
+actionProcessingRules :: Rulebook obj usr (Action obj usr act)
 actionProcessingRules = (blankRulebook "action processing rulebook") {
     _firstRules = 
         [
-            --Rule "set action variables rule" $  (do {modify setActionVariables }),
-            Rule "announce items from multiple object lists rule" $ (do
+            Rule "set action variables rule" (do
+                (w, a) <- get
+                put (w, setActionVars w a)
+                return Nothing
+                ),
+
+            Rule "announce items from multiple object lists rule" (do
                 (w, a) <- get
                 return Nothing),
-            Rule "set pronouns from items from multiple object lists rule" $ blankRule
+            Rule "set pronouns from items from multiple object lists rule" blankRule
             --Rule "before stage rule" $ abideByRulebookWithArgs "before stage rulebook" a
         ],
     _rules = 
         [
-            Rule "basic visibility rule" blankRule {-$ (do
-                (w', a') <- get
-                -- LEAVING THIS HERE JUST FOR CLARITY
-                let (result2, (world2, action2)) = runRulebookInternally (_chRules a') (Just (_actionVariables a')) w'
-                    a'' = a' { _actionVariables = action2 }
-                put (world2, a'')
-                return result2
-            )-},
-            Rule "basic accessibility rule" $ blankRule,
-            Rule "carrying requirements rule" $ blankRule
+            Rule "basic visibility rule" blankRule,
+            Rule "basic accessibility rule" blankRule,
+            Rule "carrying requirements rule" blankRule
         ],
     _lastRules = 
         [
-            Rule "instead stage rule" $ abideByRulebook "instead stage rulebook",
-            Rule "requested actions require persuasion rule" $ blankRule,
-            Rule "carry out requested actions rule" $ blankRule,
-            Rule "descend to specific action processing rule" $ (do
-                -- todo: find if this can be made neater
-                state $ abideByRulebookWithArgs specificActionProcessingRules id (\a b -> a)
-                ),
-            Rule "end action processing in success rule" (do { return $ Just True})
+            --Rule "instead stage rule" $ abideByRulebook "instead stage rulebook",
+            Rule "requested actions require persuasion rule" blankRule,
+            Rule "carry out requested actions rule" blankRule,
+            Rule "descend to specific action processing rule"
+            (state $ abideByRulebookWithArgs specificActionProcessingRules id const),
+            Rule "end action processing in success rule" (return $ Just True)
         ]}
 
+specificActionProcessingRules :: Rulebook obj usr (Action obj usr act)
+specificActionProcessingRules = (blankRulebook "descend to specific action processing rulebook") {
+    _rules = [
+        Rule "investigate player's awareness before action rule" blankRule,
+        Rule "check stage rule" (do 
+            (_, a) <- get 
+            let x = a ^. checkRules
+            case x of 
+                Nothing -> return Nothing
+                Just action -> processAction action)
+            ,
+        Rule "carry out stage rule" (do 
+            (_, a) <- get
+            processAction (a ^. carryOutRules) 
+            ),
+        Rule "after stage rule" blankRule,
+        Rule "investigate player's awareness after action rule" blankRule,
+        Rule "report stage rule" (do 
+            (_, a) <- get
+            let x = a ^. reportRules
+            case x of
+                Nothing -> return Nothing
+                Just action -> processAction action),
+        Rule "end specific action processing rule" (return $ Just True)
+            ]}
+
+-- | this is a sort of internal run rulebook
+-- take some rulebook that takes inner as its processing handmedown
+-- take a way to extract an internal part of an external context
+-- take a way to reapply the internals to the external
+-- take a world and that outer context
+-- run it all
+-- normally, this is extracting actionvars from an action.
+abideByRulebookWithArgs :: Rulebook obj usr inner -> (outer -> inner) -> (inner -> outer -> outer)
+    -> (World obj usr, outer) -> (RuleOutcome, (World obj usr, outer))
+abideByRulebookWithArgs rulebook convertIn convertOut (world, actionVars) = (result2, 
+    (world2, convertOut action2 actionVars)) where
+        (result2, (world2, action2)) = runRulebookInternally rulebook (convertIn actionVars) world
+
 -- | rulebook from actiondata (e.g. a check rulebook) that can be run in an Action context.
-processActionAbide :: Rulebook (ActionData a) -> State (World, Action a) RuleOutcome
-processActionAbide r = state $ abideByRulebookWithArgs r (\b -> b ^. actionData) (\a b -> b { _actionData = a})
+-- so all we do to make it work is take the action info from the inner context
+-- and move it back to the outer one
+-- i.e. we have an Action a with actiondata AD. a contains rulebooks and things. these run on AD.
+-- so what we do is run the rulebook on AD and get out AD', which we then set AD = AD'.
+processAction :: Rulebook obj usr (ActionData a) -> 
+    State (World obj usr, Action obj usr a) RuleOutcome
+processAction r = state $ abideByRulebookWithArgs r (view actionInfo) (\a b -> b { _actionInfo = a})
 
-processActionAbideIfExists :: Maybe (Rulebook (ActionData a)) -> State (World, Action a) RuleOutcome
-processActionAbideIfExists Nothing = return Nothing
-processActionAbideIfExists (Just r) = processActionAbide r
+processActionIfExists :: Maybe (Rulebook obj usr (ActionData a)) 
+        -> State (World obj usr, Action obj usr a) RuleOutcome
+processActionIfExists = maybe (return Nothing) processAction
 
--- | rulebook from actiondata (e.g. a check rulebook) that can be run in an actiondata context.
--- the difference is that runaction works entirely in a actiondata context.
-runActionIfExists :: Maybe (Rulebook (ActionData a)) -> (World, ActionData a) -> (RuleOutcome, (World, ActionData a))
-runActionIfExists Nothing a = (Nothing, a)
-runActionIfExists (Just r) s = abideByRulebookWithArgs r id (\a b -> b) s
+-- | this looks identical to processAction but the difference is that...this unwraps the state processing?
+runActionIfExists2 :: Maybe (Rulebook obj usr (ActionData a)) 
+        -> (World obj usr, ActionData a) -> (RuleOutcome, (World obj usr, ActionData a))
+runActionIfExists2 Nothing a = (Nothing, a)
+runActionIfExists2 (Just r) s = abideByRulebookWithArgs r id (\a b -> b) s
 
-runActivity :: Action a -> State (World, b) RuleOutcome
-runActivity a = do
+runActivity :: Action obj usr a -> a -> State (World obj usr, b) RuleOutcome
+runActivity act noun = do
     (w, b) <- get
-    let (out1, (w', a')) = runState (processActionAbideIfExists (a ^. checkRules)) (w, a)
+    let a = setActionVars w (act & actionInfo . actionVariables .~ noun)
+    let (out1, (w', a')) = runState (processActionIfExists (a ^. checkRules)) (w, a)
     case out1 of
         Just x -> do { put (w', b); return $ Just x }
         Nothing -> case out2 of
                 Just x -> do { put (w'', b); return $ Just x }
                 Nothing -> do {  put (w''', b); return out3 }
-                        where (out3, (w''', a''')) = runState (processActionAbideIfExists (a ^. reportRules)) (w'', a'')
-            where (out2, (w'', a'')) = runState (processActionAbide (a ^. carryOutRules)) (w', a')
+                        where (out3, (w''', a''')) = runState (processActionIfExists (a ^. reportRules)) (w'', a'')
+            where (out2, (w'', a'')) = runState (processAction (a ^. carryOutRules)) (w', a')
 
-runActivityIf :: Bool -> Action a -> State (World, b) RuleOutcome
-runActivityIf c a = do if c then runActivity a else return Nothing
+runActivityIf :: Bool -> Action obj usr a -> a -> State (World obj usr, b) RuleOutcome
+runActivityIf c a b = if c then runActivity a b else return Nothing
+
+-- | run an activity and ignore whatever the output is, only caring about the world state
+-- | e.g. printing stuff
+runActivityPlainly :: Action obj usr a -> a -> State (World obj usr, b) RuleOutcome
+runActivityPlainly a args = do 
+                        runActivity a args
+                        return Nothing
 
 -- | if we begin an activity, we do not do statewise stuff
 -- because we instead want to return the activity which complains with the context
 -- it's being run in.
-beginActivity :: Action a -> World -> (RuleOutcome, (World, Action a))
+beginActivity :: Action obj usr act -> World obj usr -> (RuleOutcome, (World obj usr, Action obj usr act))
 beginActivity a w = runState x (w, a) where
-    x = (processActionAbideIfExists (a ^. checkRules))
+    x = processActionIfExists (a ^. checkRules)
 
-beginActivityIf :: Bool -> Action a -> World  -> (World, Action a)
+beginActivityIf :: Bool -> Action obj usr act -> World obj usr -> (World obj usr, Action obj usr act)
 beginActivityIf cond act w = if cond
     then (let (_, x) = beginActivity act w in x)
     else (w, act)
 
-specificActionProcessingRules :: Rulebook (Action a)
-specificActionProcessingRules = (blankRulebook "descend to specific action processing rulebook") {
-    _rules = [
-        Rule "investigate player's awareness before action rule" blankRule,
-        Rule "check stage rule" $ (do 
-            (_, a) <- get
-            let x = (a ^. checkRules) 
-            case x of
-                Nothing -> return Nothing
-                Just action -> processActionAbide action
-            ),
-        Rule "carry out stage rule" $ (do 
-            (_, a) <- get
-            processActionAbide (a ^. carryOutRules) 
-            ),
-        Rule "after stage rule" blankRule,
-        Rule "investigate player's awareness after action rule" blankRule,
-        Rule "report stage rule" $ (do 
-            (_, a) <- get
-            let x = (a ^. reportRules) 
-            case x of
-                Nothing -> return Nothing
-                Just action -> processActionAbide action
-            ),
-        Rule "end specific action processing rule" (do { return $ Just True })
-            ]}
+-- | ending an activity just gives us the World usr obj act , we don't care about the outcome
+endActivity :: Action obj usr act -> World obj usr -> World obj usr
+endActivity a w = fst $ execState x (w, a) where
+    x = processActionIfExists (a ^. checkRules)
