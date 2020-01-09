@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TemplateHaskell #-}
+--{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
 module Main where
@@ -16,39 +16,9 @@ import Types
 import System.IO
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
+import Utils
+import WorldBuilder
 
-constructWorld :: World UserObjects UserLibrary
-constructWorld = World
-    {
-        _directions = constructDirections,
-        _rooms = Map.empty,
-        _title = "Untitled Goose Game",
-        _msgBuffer = MessageBuffer { _indentLvl = 0, _stdBuffer = [], _dbgBuffer = [], _msgStyle = Nothing },
-        _std = StandardLibrary {
-            _activities = constructActivities,
-            _actions = constructActions,
-            _rulebooks = constructRulebooks},
-        _objects = Map.empty
-    }
-
-constructRulebooks :: RulebookCollection UserObjects UserLibrary
-constructRulebooks = RulebookCollection
-    {
-        _whenPlayBeginsRules = whenPlayBeginsRulesImpl
-    }
-
-constructActivities :: ActivityCollection UserObjects UserLibrary
-constructActivities = ActivityCollection
-    {
-        _printingDarkRoomNameActivity = printingDarkRoomNameActivityImpl,
-        _printingNameActivity = printingNameActivityImpl
-    }
-
-constructActions :: ActionCollection UserObjects UserLibrary
-constructActions = ActionCollection
-    {
-        _lookingAction = lookingActionImpl
-    }
 
 type UserLibrary = Int
 type UserObjects = ()
@@ -56,9 +26,19 @@ type UserActions = Int
 
 instance HasLocation UserObjects where
     getLocation _ _ = nowhereRoom
+
+--constructWorld :: [Construct UserObjects UserLibrary] -> Either (World UserObjects UserLibrary) [T.Text]
+--constructWorld c = verifyWorld $ foldl applyConstruct baseWorld c
+
+worldBuilder :: State (WorldBuilder UserObjects UserLibrary) ID
+worldBuilder = do
+    room <- addRoom $ makeRoom "test room" "this is a test"
+    op <- addObject $ makeThing "pen" "its a pen"
+    return ""
+
 main :: IO ()
 main = do
-    let (_, x) = runRulebook whenPlayBeginsRulesImpl constructWorld
+    let (_, x) = runRulebook whenPlayBeginsRulesImpl (fromLeft $ makeWorld worldBuilder)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
     putStrLn ""

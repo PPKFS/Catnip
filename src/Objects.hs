@@ -14,46 +14,51 @@ import Utils
 import Data.Maybe
 
 lookupID :: World obj usr -> ID -> Maybe (Object obj)
-lookupID w i = Map.lookup i (w ^. objects)
-    
+lookupID w i = case x of
+    Just y -> x
+    Nothing -> Map.lookup i (w ^. objects)
+    where x = Map.lookup i (w ^. rooms)
+
+lookupInManyMaps :: Ord a => [Map.Map a b] -> a -> Maybe b
+lookupInManyMaps [] _ = Nothing
+lookupInManyMaps (x:xs) z = case y of
+    Just z -> y
+    Nothing -> lookupInManyMaps xs z
+    where y = Map.lookup z x
+
+lookupLocation :: World obj usr -> ID -> Maybe (Object obj)
+lookupLocation w = lookupInManyMaps [w ^. rooms, w ^. objects]
+
 class HasLocation a where
     getLocation :: HasLocation obj => World obj usr -> a -> LocationObj obj
 
+-- if it's a room, we get back a region.
+-- otherwise, we just get the location of the object
 instance HasLocation obj => HasLocation (Object obj) where
-    getLocation w o = getLocation w (o ^. info)
-
-instance HasLocation obj => HasLocation (ObjectInfo obj) where
-    getLocation w (Room x) = getLocation w x
-    getLocation w (Thing x) = getLocation w x
-    getLocation w (ExtInfo y) = getLocation w y
+    getLocation w o = case objType of
+                        Room r -> getLocation w r
+                        _ -> getLocation w (o ^. location)
+                        where objType = o ^. info
 
 instance HasLocation ID where
     getLocation w i = case obj of
                         Nothing -> nowhereRoom
                         Just x -> getLocation w x
-                        where obj = lookupID w i
+                        where obj = lookupLocation w i
 
 instance HasLocation RoomData where
     getLocation w rd = fromMaybe globalRegion $ rd ^. containingRegion >>= lookupID w
-    
-instance HasLocation ThingData where
-    getLocation w t = fromMaybe nowhereRoom (do
-        let x = t ^. location
-        lookupID w x)
 
--- TODO: add a properly random way to generate IDs
-randomList :: T.Text
-randomList = "f6h3"
+getLocationID :: HasLocation x => HasLocation obj => World obj usr -> x -> ID
+getLocationID w x = view objID $ getLocation w x
 
-lengthNameID :: Int
-lengthNameID = 4
+makeObject :: Name -> Description -> ID -> ObjectInfo obj -> Object obj
+makeObject n d i = Object i n ImproperNamed SingularNamed 
+        (getIndefiniteArticle ImproperNamed SingularNamed (T.head n)) d "" (nowhereRoom ^. objID)
+        Lit Inedible Portable Unwearable NotPushableBetweenRooms Unhandled Described Mentioned UnmarkedForListing
 
-mkID :: Name -> ID
-mkID n = T.take lengthNameID n `T.append` randomList
-
-makeObject :: Name -> ObjectInfo obj -> Object obj
-makeObject n = Object (mkID n) n ImproperNamed SingularNamed 
-        (getIndefiniteArticle ImproperNamed SingularNamed (T.head n))
+makeThing :: Name -> Description -> ID -> Object obj
+makeThing n d i = makeObject n d i Thing
 
 -- | if we need to make an indefinite article by default
 getIndefiniteArticle :: NameProperness -> NamePlurality -> Char -> T.Text
@@ -72,7 +77,7 @@ instance Show (Object x) where
               a = c ^. name
               
 direction :: Name -> Opposite -> DirectionObj obj
-direction n opp = set objID n $ makeObject n (Direction opp)
+direction n opp = set objID n $ makeObject n "" n (Direction opp) 
 
 directionPair :: Name -> Name -> (DirectionObj obj, DirectionObj obj)
 directionPair d1 d2 = (direction d1 d2, direction d2 d1) -- since the id of a direction is just its name
@@ -88,24 +93,20 @@ constructDirections = Map.fromList [(n ^. name, n) |(a, b) <-
      n <- [a, b]]
 
 --    ROOM STUFF --
-makeRoom :: Name -> Description -> RoomObj obj
-makeRoom n desc = makeObject n $ Room (RoomData desc Lighted Unvisited Map.empty Nothing)
+makeRoom :: Name -> Description -> ID -> RoomObj obj
+makeRoom n desc i = makeObject n desc i $ Room (RoomData Unvisited Map.empty Nothing)
 
-nowhereRoom :: (RoomObj obj)
-nowhereRoom = (makeRoom "Nowhere, The Void, You Screwed Up" "If you're here, you've messed up something chronic.") 
-                { _objID = "0xDEADBEEF"} 
+nowhereRoom :: RoomObj obj
+nowhereRoom = makeRoom "Nowhere, The Void, You Screwed Up" 
+                "If you're here, you've messed up something chronic." "0xDEADBEEF" 
 
 globalRegion :: ThingObj obj
-globalRegion = set objID "GLOBAL_REGION" $ makeObject "global region" Region
+globalRegion = makeObject "global region" "" "0xDEADBEEF" Region
 
 penID = "test"
 blankActionData = ActionData { _currentActor = penID}
 
-makeThing :: Name -> Description -> ThingObj obj
-makeThing n d = makeObject n $ Thing (ThingData d (nowhereRoom ^. objID) "" 
-    Lit Inedible Portable Unwearable NotPushableBetweenRooms Unhandled Described Mentioned UnmarkedForListing)
-
-pen :: ThingObj obj
+pen :: ID -> ThingObj obj
 pen = makeThing "Bic pen" "just a pen"
 
 data Enterable = Enterable | NotEnterable

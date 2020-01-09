@@ -32,13 +32,25 @@ data Object obj = Object
         _nameProperness :: NameProperness,
         _namePlurality :: NamePlurality,
         _indefiniteArticle :: T.Text,
+        _description :: Description,
+        _initialAppearance :: InitialAppearance,
+        _location :: LocationID,
+        _lit :: ThingLit,
+        _edible :: Edibility,
+        _portable :: Portability,
+        _wearable :: Wearability,
+        _pushable :: Pushable,
+        _handled :: Handled,
+        _described :: Described,
+        _mentioned :: Mentioned,
+        _markedForListing :: MarkedForListing,
         _info :: ObjectInfo obj
     }
 
 -- | Surprisingly, directions are indeed objects. The only field they need is an opposite.
 type Opposite = ID
 
-data ObjectInfo obj = Direction Opposite | Room RoomData | Region | Thing ThingData | Door DoorData | ExtInfo obj
+data ObjectInfo obj = Direction Opposite | Room RoomData | Region | Thing | Door DoorData | ExtInfo obj
 
 -- | And our basic field types
 type ID = T.Text
@@ -46,11 +58,13 @@ type Name = T.Text
 data NameProperness = ImproperNamed | ProperNamed deriving Show
 data NamePlurality = SingularNamed | PluralNamed deriving Show
 
+data Capitalisation = Capitalised | Uncapitalised
+data Definiteness = Indefinite | Definite
+data NameStyle = NameStyle Capitalisation Definiteness
+
 -- | RoomData is fairly straightforward.
 data RoomData = RoomData 
     {
-        _roomDescription :: Description,
-        _darkness :: Darkness,
         _isVisited :: IsVisited,
         _mapConnections :: MapConnections,
         _containingRegion :: ContainingRegion
@@ -77,27 +91,11 @@ type InitialAppearance = Description
 -- | a location doesn't necessarily have to be a room (e.g. a vehicle or container)
 type LocationID = ID
 
--- | ThingData is parameterised similar to objects.
-data ThingData = ThingData {
-    _description :: Description,
-    _location :: LocationID,
-    _initialAppearance :: InitialAppearance,
-    _lit :: ThingLit,
-    _edible :: Edibility,
-    _portable :: Portability,
-    _wearable :: Wearability,
-    _pushable :: Pushable,
-    _handled :: Handled,
-    _described :: Described,
-    _mentioned :: Mentioned,
-    _markedForListing :: MarkedForListing 
-    }
-    
 -- | a door is straightforward.
 type OtherSide = ID
 data Openable = Openable | Unopenable
 data Open = Open | Closed
-data DoorData = DoorData ThingData OtherSide Open Openable
+data DoorData = DoorData OtherSide Open Openable
 
 type DirectionObj obj = Object obj
 type RoomObj obj = Object obj
@@ -114,7 +112,10 @@ data World obj usr = World
         _msgBuffer :: MessageBuffer,
         _objects :: Map.Map ID (Object obj),
         _std :: StandardLibrary obj usr,
-        _usrLibrary :: usr
+        _usrLibrary :: usr,
+        _player :: ID,--Object obj,
+        _firstRoom :: ID,
+        _nextObjID :: ID
     }
 
 data MessageBuffer = MessageBuffer
@@ -188,7 +189,7 @@ type PlainRulebook obj usr = Rulebook obj usr ()
 data ActivityCollection obj usr = ActivityCollection
     {
         _printingDarkRoomNameActivity :: Action obj usr (),
-        _printingNameActivity :: Action obj usr (Object obj)
+        _printingNameActivity :: Action obj usr (Object obj, NameStyle)
     }
 
 newtype RulebookCollection obj usr  = RulebookCollection
@@ -220,7 +221,7 @@ makeLenses ''LookingActionVariables
 makeLenses ''StandardLibrary
 makeLenses ''ActivityCollection
 makeLenses ''RoomData
-makeLenses ''ThingData
+makeLenses ''ActionCollection
 
 -- | some helpful show rules for the debugging
 instance Show (Rule obj usr act) where
