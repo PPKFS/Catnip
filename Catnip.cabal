@@ -60,6 +60,7 @@ executable Catnip-exe
     , prettyprinter
     , prettyprinter-ansi-terminal
     , total
+    , transformers
   default-language: Haskell2010
   extensions:
       TypeApplications

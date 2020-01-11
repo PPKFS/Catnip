@@ -45,8 +45,11 @@ sayDbg a = sayDbgInt (pretty a)
 sayDbgLn :: T.Text ->  World obj usr ->  World obj usr
 sayDbgLn a = sayDbgInt (pretty a <> line)
 
-sayDbgModifyLn :: T.Text -> WorldUpdate obj usr  b ()
-sayDbgModifyLn a = modifyWorld (sayDbgLn a)
+sayDbgModifyLn :: T.Text -> State (World obj usr) ()
+sayDbgModifyLn a = modify (sayDbgLn a)
+
+sayDbgModifyLnR :: T.Text -> WorldUpdate obj usr b ()
+sayDbgModifyLnR a = modifyWorld (sayDbgLn a)
 
 indentDbg ::  World obj usr -> Bool ->  World obj usr
 indentDbg w b = w & msgBuffer . indentLvl %~ (+) ((if b then 1 else (-1)) * 4)-- w2 & msgBuffer . stdBuffer %~ ((:) $ (w ^. msgBuffer . indentLvl, line)) where

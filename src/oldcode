@@ -1,0 +1,114 @@
+-- | this is the meat of the rulebook code
+-- we take a rulebook, which we initialise with some data a
+-- we then iterate all 3 of its rulebooks, doing stuff if needbe
+-- if we hit a value other than nothing, we return and stop
+runRulebookInternallyOld :: Rulebook obj usr a -> a -> World obj usr -> (RuleOutcome, (World obj usr, a))
+runRulebookInternallyOld r x w = (res, (w2', a')) where
+        (res, (w', a')) = iterateRulebooks [r ^. firstRules, r ^. rules, r ^. lastRules] a w2
+        w1 = indentDbg w True
+        a = x
+        w2 = if' ( r ^. rulebookName /= "") 
+            (sayDbgLn ("Following the " <> (r ^. rulebookName)) w1)
+            w1
+        w2' = indentDbg w' False
+        iterateRulebooks :: [[Rule obj usr act]] -> act -> World obj usr -> (RuleOutcome, (World obj usr, act))
+        iterateRulebooks [] a w = (r ^. defaultOutcome, (w, a))
+        iterateRulebooks (x:xs) a w = case ro of
+            (Just _, _) -> ro
+            (Nothing, (w', a')) -> iterateRulebooks xs a' w'
+            where ro = undefined --runRuleset x a w
+
+
+
+-- | internal use function ; run a list of rules
+runRulesetOld :: [Rule obj usr a] -> a -> World obj usr -> (RuleOutcome, (World obj usr, a))
+runRulesetOld [] a w = (Nothing, (w, a))
+runRulesetOld (r:rs) a w = case x of
+    (Just True, _) -> x
+    (Nothing, (w', a')) -> undefined--runRuleset rs a' w'
+    where x = runState y (w, a)
+          y = if' ( r ^. ruleName /= "")
+            printFollowing
+            (r ^. ruleProcessor) where
+                printFollowing = do 
+                            modifyWorld $ sayDbgLn ("Following the " `mappend` (r ^. ruleName))
+                            r ^. ruleProcessor
+
+-- | this is a sort of internal run rulebook
+-- take some rulebook that takes inner as its processing handmedown
+-- take a way to extract an internal part of an external context
+-- take a way to reapply the internals to the external
+-- take a world and that outer context
+-- run it all
+-- normally, this is extracting actionvars from an action.
+abideByRulebookWithArgsOld :: Rulebook obj usr inner -> (outer -> inner) -> (inner -> outer -> outer)
+    -> (World obj usr, outer) -> (RuleOutcome, (World obj usr, outer))
+abideByRulebookWithArgsOld rulebook convertIn convertOut (world, actionVars) = (result2, 
+    (world2, convertOut action2 actionVars)) where
+        (result2, (world2, action2)) = undefined --runRulebookInternally rulebook (convertIn actionVars) world
+
+-- | rulebook from actiondata (e.g. a check rulebook) that can be run in an Action context.
+-- so all we do to make it work is take the action info from the inner context
+-- and move it back to the outer one
+-- i.e. we have an Action a with actiondata AD. a contains rulebooks and things. these run on AD.
+-- so what we do is run the rulebook on AD and get out AD', which we then set AD = AD'.
+processAction :: Rulebook obj usr (ActionData a) -> 
+    State (World obj usr, Action obj usr a) RuleOutcome
+processAction r = state $ abideByRulebookWithArgs r (view actionInfo) (\a b -> b { _actionInfo = a})
+
+processActionIfExists :: Maybe (Rulebook obj usr (ActionData a)) 
+        -> State (World obj usr, Action obj usr a) RuleOutcome
+processActionIfExists = maybe (return Nothing) processAction
+
+-- | this looks identical to processAction but the difference is that...this unwraps the state processing?
+runActionIfExists2 :: Maybe (Rulebook obj usr (ActionData a)) 
+        -> (World obj usr, ActionData a) -> (RuleOutcome, (World obj usr, ActionData a))
+runActionIfExists2 Nothing a = (Nothing, a)
+runActionIfExists2 (Just r) s = abideByRulebookWithArgs r id (\a b -> b) s
+
+
+runActivityOld :: Action obj usr a -> a -> State (World obj usr) RuleOutcome
+runActivityOld act noun = do
+    (w, b) <- get
+    let a = setActionVars w (act & actionInfo . actionVariables .~ noun)
+    let (out1, (w', a')) = runState (processActionIfExists (a ^. checkRules)) (w, a)
+    case out1 of
+        Just x -> do { put (w', b); return $ Just x }
+        Nothing -> case out2 of
+                Just x -> do { put (w'', b); return $ Just x }
+                Nothing -> do {  put (w''', b); return out3 }
+                        where (out3, (w''', a''')) = runState (processActionIfExists (a ^. reportRules)) (w'', a'')
+            where (out2, (w'', a'')) = runState (processAction (a ^. carryOutRules)) (w', a')
+
+
+runActivityIf :: Bool -> Action obj usr a -> a -> State (World obj usr, b) RuleOutcome
+runActivityIf c a b = if c then runActivity a b else return Nothing
+
+-- | run an activity and ignore whatever the output is, only caring about the world state
+-- | e.g. printing stuff
+runActivityPlainly :: Action obj usr a -> a -> State (World obj usr, b) RuleOutcome
+runActivityPlainly a args = do 
+                        runActivity a args
+                        return Nothing
+
+
+-- | trying an action gives an outcome of whether it succeeded and the newly updated
+-- world (if it affected the change)
+tryActionOld :: Action obj usr act -> State (World obj usr) ActionOutcome
+tryActionOld ac world = case result of
+    -- should never result in nothing BUT.
+    Nothing -> undefined
+    Just r ->  (r, world3)
+    -- run the action processing rulebook.
+    -- right now I have to hardcode it because I'm feeding it an 'a' thing.
+    -- run the action processing rulebook with initial setting action
+    -- and then parse out the results. I guess it's kinda buggy that I can't
+    -- work out how to thread it so I don't need to use undefineds or 
+    -- to duplicate code but oh well.
+    where world2 = sayDbgLn ("Trying to do the " <> (ac ^. actionName) <> " action") world
+          (result, (world3, _)) = runRulebook actionProcessingRules 
+                (ac & (actionInfo . currentActor) .~ pl) world2
+          pl = world ^. player
+
+runRulebookOld :: Rulebook obj usr a -> a -> State (World obj usr) RuleOutcome
+runRulebookOld r = undefined--zoomOut (runRulebook r)

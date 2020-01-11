@@ -38,7 +38,7 @@ worldBuilder = do
 
 main :: IO ()
 main = do
-    let (_, x) = runRulebook whenPlayBeginsRulesImpl (fromLeft $ makeWorld worldBuilder)
+    let x = execState (runPlainRulebook whenPlayBeginsRulesImpl) (fromLeft $ makeWorld worldBuilder)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
     putStrLn ""

@@ -16,6 +16,7 @@ import System.IO
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 import Lens.Family.Total
+import Data.Set
 
 -- | Everything that can be interacted with is an object.
 -- it may be abstract (idk, an idea???) or concrete (a thing).
@@ -107,7 +108,7 @@ type LocationObj obj = Object obj
 data World obj usr = World
     {
         _directions :: Map.Map ID (DirectionObj obj),
-        _rooms :: Map.Map ID (RoomObj obj),
+        _rooms :: Set ID,
         _title :: T.Text,
         _msgBuffer :: MessageBuffer,
         _objects :: Map.Map ID (Object obj),
@@ -157,10 +158,9 @@ data Action obj usr act = Action
         _actionInfo :: ActionData act,
         _setActionVariables :: Maybe (World obj usr -> ActionData act -> ActionData act)
     }
--- | most actions are plain actions.
---type PlainAction usr obj = Action usr obj () 
 
 type RuleOutcome = Maybe Bool
+type ActionOutcome = Bool
 type WorldUpdate obj usr a b  = State (World obj usr, a) b
 type WorldRuleState obj usr a  = WorldUpdate obj usr a RuleOutcome 
 
@@ -189,7 +189,7 @@ type PlainRulebook obj usr = Rulebook obj usr ()
 data ActivityCollection obj usr = ActivityCollection
     {
         _printingDarkRoomNameActivity :: Action obj usr (),
-        _printingNameActivity :: Action obj usr (Object obj, NameStyle)
+        _printingNameActivity :: Object obj -> NameStyle -> Action obj usr ()
     }
 
 newtype RulebookCollection obj usr  = RulebookCollection

@@ -18,19 +18,21 @@ import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 import Utils
 import Lens.Family.Total
+import Data.Set
 
 baseWorld :: HasLocation obj => World obj usr
 baseWorld = World
     {
         _directions = constructDirections,
-        _rooms = Map.empty,
+        _rooms = empty,
         _title = "Untitled Goose Game",
         _msgBuffer = MessageBuffer { _indentLvl = 0, _stdBuffer = [], _dbgBuffer = [], _msgStyle = Nothing },
         _std = StandardLibrary {
             _activities = constructActivities,
             _actions = constructActions,
             _rulebooks = constructRulebooks},
-        _objects = Map.fromList [("PLAYER", makeThing "yourself" "it's you." "PLAYER")],
+        _objects = Map.fromList [("PLAYER", makeThing "yourself" "it's you." "PLAYER"), 
+            (nowhereRoom ^. objID, nowhereRoom)],
         _player = "PLAYER",
         _nextObjID = "0",
         _firstRoom = "NA"
@@ -88,7 +90,8 @@ addRoom :: (ID -> RoomObj obj) -> State (WorldBuilder obj usr) ID
 addRoom obj = do
     newID <- generateID
     let newObj = obj newID
-    _1 . rooms . at newID ?= newObj
+    _1 . rooms %= insert newID
+    _1 . objects . at newID ?= newObj
     (w, _) <- get
     when ((w ^. firstRoom) == "NA") $ _1 . firstRoom .= newID
     _2 . currentRoom .=  newID

@@ -14,20 +14,7 @@ import Utils
 import Data.Maybe
 
 lookupID :: World obj usr -> ID -> Maybe (Object obj)
-lookupID w i = case x of
-    Just y -> x
-    Nothing -> Map.lookup i (w ^. objects)
-    where x = Map.lookup i (w ^. rooms)
-
-lookupInManyMaps :: Ord a => [Map.Map a b] -> a -> Maybe b
-lookupInManyMaps [] _ = Nothing
-lookupInManyMaps (x:xs) z = case y of
-    Just z -> y
-    Nothing -> lookupInManyMaps xs z
-    where y = Map.lookup z x
-
-lookupLocation :: World obj usr -> ID -> Maybe (Object obj)
-lookupLocation w = lookupInManyMaps [w ^. rooms, w ^. objects]
+lookupID w i = Map.lookup i (w ^. objects)
 
 class HasLocation a where
     getLocation :: HasLocation obj => World obj usr -> a -> LocationObj obj
@@ -37,14 +24,14 @@ class HasLocation a where
 instance HasLocation obj => HasLocation (Object obj) where
     getLocation w o = case objType of
                         Room r -> getLocation w r
-                        _ -> getLocation w (o ^. location)
+                        _ -> fromJust $ lookupID w (o ^. location)
                         where objType = o ^. info
-
+-- TODO: find better error handling.
 instance HasLocation ID where
     getLocation w i = case obj of
-                        Nothing -> nowhereRoom
+                        Nothing -> error (show i)
                         Just x -> getLocation w x
-                        where obj = lookupLocation w i
+                        where obj = lookupID w i
 
 instance HasLocation RoomData where
     getLocation w rd = fromMaybe globalRegion $ rd ^. containingRegion >>= lookupID w
@@ -113,7 +100,6 @@ data Enterable = Enterable | NotEnterable
 data Opaqueness = Opaque | Transparent
 type CarryingCapacity = Int
 data ContainerData = ContainerData Opaqueness Enterable Open Openable
-
 
 -- we start by reading the first 2 characters of the id, which gives us some kind of lookup table as to which record
 -- field we want

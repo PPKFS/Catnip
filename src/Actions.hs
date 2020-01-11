@@ -19,29 +19,26 @@ import Data.Text.Prettyprint.Doc.Render.Terminal
 import Data.Maybe
 import Control.Applicative
 
--- | trying an action gives an outcome of whether it succeeded and the newly updated
--- world (if it affected the change)
-tryAction :: Action obj usr act -> World obj usr -> (Bool, World obj usr)
-tryAction ac world = case result of
-    -- should never result in nothing BUT.
-    Nothing -> (True, world3) 
-    Just r ->  (r, world3)
-    -- run the action processing rulebook.
-    -- right now I have to hardcode it because I'm feeding it an 'a' thing.
-    -- run the action processing rulebook with initial setting action
-    -- and then parse out the results. I guess it's kinda buggy that I can't
-    -- work out how to thread it so I don't need to use undefineds or 
-    -- to duplicate code but oh well.
-    where world2 = sayDbgLn ("Trying to do the " <> (ac ^. actionName) <> " action") world
-          (result, (world3, _)) = runRulebookInternally actionProcessingRules 
-                (ac & (actionInfo . currentActor) .~ pl) world2
-          pl = world ^. player
+tryAction :: Action obj usr act -> State (World obj usr) ActionOutcome
+tryAction ac = do
+    sayDbgModifyLn ("Trying to do the " <> (ac ^. actionName) <> " action")
+    w <- get
+    x <- zoomOut (runRulebook actionProcessingRules) (ac & (actionInfo . currentActor) .~ (w ^. player))
+    return $ fromMaybe True x
 
-printName :: Object obj -> World obj usr -> State (World obj usr, b) RuleOutcome
-printName op w = printNameExtended op w defaultStyle
+printName :: Object obj -> State (World obj usr) RuleOutcome
+printName op = printNameExtended op defaultStyle
 
-printNameExtended :: Object obj -> World obj usr -> NameStyle -> State (World obj usr, b) RuleOutcome
-printNameExtended op w s = runActivity (w ^. std . activities . printingNameActivity) (op, s)
+printNameR :: Object obj -> State (World obj usr, b) RuleOutcome
+printNameR op = zoom _1 (printName op)
+
+printNameExtended :: Object obj -> NameStyle -> State (World obj usr) RuleOutcome
+printNameExtended op s = do
+    w <- get
+    runActivity ((w ^. std . activities . printingNameActivity) op s)
+
+printNameExtendedR :: Object obj -> NameStyle -> State (World obj usr, b) RuleOutcome
+printNameExtendedR op s = zoom _1 (printNameExtended op s)
 -- LOOKING --
 -- consists of looking and all the activities naturally associated with looking
 -- mostly that's printing out room
@@ -61,12 +58,10 @@ printNameExtended op w s = runActivity (w ^. std . activities . printingNameActi
     --add it to the new location
     --set it to the new location too
 
-printingNameActivityImpl :: Action obj usr (Object obj, NameStyle)
-printingNameActivityImpl = (makeActivity "printing the name of something activity" []){
+printingNameActivityImpl :: Object obj -> NameStyle -> Action obj usr ()
+printingNameActivityImpl obj sty = (makeActivity "printing the name of something activity" []){
     _carryOutRules = (blankRulebook "") {
         _lastRules = [ Rule "standard name printing rule" (do
-            (w, a) <- get
-            let (obj, sty) = a ^. actionVariables
             sayModifyLn $ obj ^. name
             return Nothing
             )
@@ -95,15 +90,12 @@ lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
             -- and append them.
             modifyWorld $ setStyle (Just bold)
             (w, a) <- get
-            
             let loc = getLocation w (a ^. currentActor)
-            sayDbgModifyLn (a ^. currentActor)
-            --sayModifyLn $ fromMaybe pen (lookupID w (a ^. currentActor)) ^. name
             if' ((a ^. actionVariables . visibilityLvlCnt) == 1)
-                (runActivity (w ^. std . activities . printingDarkRoomNameActivity) ())
+                (runActivityR (w ^. std . activities . printingDarkRoomNameActivity))
                 $ if' ((a ^. actionVariables . visibilityCeiling) == (loc ^. objID))
-                    (printName loc w)
-                    (printNameExtended loc w (NameStyle Capitalised Definite))
+                    (printNameR loc)
+                    (printNameExtendedR loc (NameStyle Capitalised Definite))
             modifyWorld $ setStyle Nothing
             return Nothing
             ),
@@ -121,17 +113,16 @@ lookingActionImpl :: HasLocation obj => Action obj usr LookingActionVariables
 lookingActionImpl = Action
     {
         _actionName = "looking",
-        _checkRules = Just lookingCarryOutRules,
+        _checkRules = Nothing,--Just lookingCarryOutRules,
         _carryOutRules = lookingCarryOutRules,
-        _reportRules = Just lookingCarryOutRules,
+        _reportRules = Nothing,--Just lookingCarryOutRules,
         _actionInfo = blankActionData {  _actionVariables = LookingActionVariables 
             {
                 _roomDescribingAction = "",
                 _abbrevFormAllowed = False,
                 _visibilityLvlCnt = 0,
                 _visibilityCeiling = ""
-            }},
-        _setActionVariables = Nothing
+            }}
     }
 
 introText :: World obj usr -> World obj usr
@@ -159,27 +150,14 @@ whenPlayBeginsRulesImpl = (blankRulebook "when play begins rulebook") {
                 modifyWorld introText
                 return Nothing),
             Rule "position player in model world rule" (do
-                (w, _) <- get
-                sayModifyLn (w ^. firstRoom)
-                sayModifyLn $ getLocationID w (w ^. player)
-                sayModifyLn $ fromJust (w ^. objects . at (w ^. player)) ^. objID
                 zoom _1 (do
                     w <- get
-                    zoom (objects . ix (w ^. player)) (
-                     location .= (w ^. firstRoom))
-                    )
-                (w2, _) <- get
-                sayModifyLn (w2 ^. firstRoom)
-                sayModifyLn $ getLocationID w2 (w2 ^. player)
-                sayModifyLn $ getLocationID w2 $ fromJust (w2 ^. objects . at "PLAYER")
+                    objects . ix (w ^. player) . location .= (w ^. firstRoom))
                     --move <$> use player <*> use firstRoom)
                 return Nothing),
             -- | do looking.
             Rule "initial room description rule" (do 
-                (w, _) <- get
-                -- TODO DEBUG
-                --sayModifyLn $ T.pack $ show (Map.size $ w ^. objects)
-                modifyWorld $ \x -> snd (tryAction (w ^. std . actions . lookingAction) x)
+                zoom _1 $ do { w <- get ; tryAction (w ^. std . actions . lookingAction)}
                 return Nothing)
         ]
 }
