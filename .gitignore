@@ -6,7 +6,6 @@ app/*
 .vscode/*
 ChangeLog.md
 stack.yaml.lock
-test/*
 src/Types.o
 dist-newstyle/*
 .HTF/Catnip-test.history
