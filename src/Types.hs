@@ -24,7 +24,7 @@ import Data.Set
 -- directions only need 1 extra property (their opposite) but a person
 -- would have some kind of person construction, encompassing physicalproperties
 -- as well as living properties and probably sentient properties, etc.
-data Object obj = Object 
+data Object = Object 
     {
         _objID :: ID,
         _name :: Name,
@@ -43,13 +43,13 @@ data Object obj = Object
         _described :: Described,
         _mentioned :: Mentioned,
         _markedForListing :: MarkedForListing,
-        _info :: ObjectInfo obj
+        _info :: ObjectInfo
     }
 
 -- | Surprisingly, directions are indeed objects. The only field they need is an opposite.
 type Opposite = ID
 
-data ObjectInfo obj = Direction Opposite | Room RoomData | Region | Thing | Door DoorData | ExtInfo obj
+data ObjectInfo = Direction Opposite | Room RoomData | Region | Thing | Door DoorData
 
 -- | And our basic field types
 type ID = T.Text
@@ -96,22 +96,22 @@ data Openable = Openable | Unopenable
 data Open = Open | Closed
 data DoorData = DoorData OtherSide Open Openable
 
-type DirectionObj obj = Object obj
-type RoomObj obj = Object obj
-type ThingObj obj = Object obj
-type LocationObj obj = Object obj
+type DirectionObj = Object
+type RoomObj = Object
+type ThingObj = Object
+type LocationObj = Object
 
 -- | This is the big beefy state of everything
 -- usr is the user defined collection of rulebooks, actions, and activities.
-data World obj usr = World
+data World = World
     {
-        _directions :: Map.Map ID (DirectionObj obj),
+        _directions :: Map.Map ID DirectionObj,
         _rooms :: Set ID,
         _title :: T.Text,
         _msgBuffer :: MessageBuffer,
-        _objects :: Map.Map ID (Object obj),
-        _std :: StandardLibrary obj usr,
-        _usrLibrary :: usr,
+        _objects :: Map.Map ID Object,
+        _std :: StandardLibrary,
+        --_usrLibrary :: usr,
         _player :: ID,--Object obj,
         _firstRoom :: ID,
         _nextObjID :: ID,
@@ -128,11 +128,11 @@ data MessageBuffer = MessageBuffer
     }
 
 -- | the standard library is the equivalent of inform's standard rules.
-data StandardLibrary obj usr = StandardLibrary
+data StandardLibrary = StandardLibrary
     {
-        _activities :: ActivityCollection obj usr,
-        _actions :: ActionCollection obj usr,
-        _rulebooks :: RulebookCollection obj usr
+        _activities :: ActivityCollection,
+        _actions :: ActionCollection,
+        _rulebooks :: RulebookCollection
     }
 -- | An action covers both inform actions and inform activities. I cannot work out what the difference really
 -- is from the documentation, except that an action can be explicitly called upon by the player.
@@ -147,60 +147,60 @@ data ActionData act = ActionData
         _actionVariables :: act
     }
 
-data Action obj usr act = Action
+data Action act = Action
     {
         _actionName :: Name,
-        _checkRules :: Maybe (Rulebook obj usr (ActionData act)),
-        _carryOutRules :: Rulebook obj usr (ActionData act),
-        _reportRules :: Maybe (Rulebook obj usr (ActionData act)),
+        _checkRules :: Maybe (Rulebook (ActionData act)),
+        _carryOutRules :: Rulebook (ActionData act),
+        _reportRules :: Maybe (Rulebook (ActionData act)),
         -- | given a world, set the initial values of whatever the action variables is
         -- | it has some default set.
         _actionInfo :: ActionData act,
-        _setActionVariables :: Maybe (World obj usr -> ActionData act -> ActionData act)
+        _setActionVariables :: Maybe (World -> ActionData act -> ActionData act)
     }
 
 type RuleOutcome = Maybe Bool
 type ActionOutcome = Bool
-type WorldUpdate obj usr a b  = State (World obj usr, a) b
-type WorldRuleState obj usr a  = WorldUpdate obj usr a RuleOutcome 
+type WorldUpdate a b  = State (World, a) b
+type WorldRuleState a  = WorldUpdate a RuleOutcome 
 
 -- | WorldRuleState is a state processor; you feed it (World, PotentiallyParameters)
 -- | and get out (Result, (PotentiallChangedWorld, PotentiallyChangedParameters))
-data Rule obj usr a  = Rule 
+data Rule a  = Rule 
     {
         _ruleName :: Name,
-        _ruleProcessor :: WorldRuleState obj usr a 
+        _ruleProcessor :: WorldRuleState a 
     }
 
-anonRule :: WorldRuleState obj usr a  -> Rule obj usr a 
+anonRule :: WorldRuleState a  -> Rule a 
 anonRule rule = Rule { _ruleName = "", _ruleProcessor = rule }
 
-data Rulebook obj usr a = Rulebook
+data Rulebook a = Rulebook
     {
         _rulebookName :: Name,
-        _firstRules :: [Rule obj usr a],
-        _rules :: [Rule obj usr a],
-        _lastRules :: [Rule obj usr a],
+        _firstRules :: [Rule a],
+        _rules :: [Rule a],
+        _lastRules :: [Rule a],
         _defaultOutcome :: Maybe Bool
     }
     
-type PlainRulebook obj usr = Rulebook obj usr ()
+type PlainRulebook = Rulebook ()
 
-data ActivityCollection obj usr = ActivityCollection
+data ActivityCollection = ActivityCollection
     {
-        _printingDarkRoomNameActivity :: Action obj usr (),
-        _printingDarkRoomDescriptionActivity :: Action obj usr (),
-        _printingNameActivity :: Object obj -> NameStyle -> Action obj usr ()
+        _printingDarkRoomNameActivity :: Action (),
+        _printingDarkRoomDescriptionActivity :: Action (),
+        _printingNameActivity :: Object -> NameStyle -> Action ()
     }
 
-newtype RulebookCollection obj usr  = RulebookCollection
+newtype RulebookCollection  = RulebookCollection
     {
-        _whenPlayBeginsRules :: PlainRulebook obj usr 
+        _whenPlayBeginsRules :: PlainRulebook 
     }
 
-newtype ActionCollection obj usr = ActionCollection
+newtype ActionCollection = ActionCollection
     {
-        _lookingAction :: Action obj usr LookingActionVariables 
+        _lookingAction :: Action LookingActionVariables 
     }
 
 data RoomDescriptionSetting = NormalDescriptions | BriefDescriptions | VerboseDescriptions deriving (Eq, Show)
@@ -243,8 +243,8 @@ makeLenses ''RulebookCollection
 makePrisms ''ObjectInfo
 
 -- | some helpful show rules for the debugging
-instance Show (Rule obj usr act) where
+instance Show (Rule act) where
     show r = T.unpack $ _ruleName r--r ^. ruleName
 
-instance Show (Rulebook obj usr act) where
+instance Show (Rulebook act) where
     show r = T.unpack $ r ^. rulebookName

@@ -30,7 +30,7 @@ instance HasLocation UserObjects where
 --constructWorld :: [Construct UserObjects UserLibrary] -> Either (World UserObjects UserLibrary) [T.Text]
 --constructWorld c = verifyWorld $ foldl applyConstruct baseWorld c
 
-worldBuilder :: State (WorldBuilder UserObjects UserLibrary) ID
+worldBuilder :: State (WorldBuilder) ID
 worldBuilder = do
     room <- addRoom $ makeRoom "test room" "this is a test"
     op <- addObject $ makeThing "pen" "its a pen"
@@ -38,7 +38,7 @@ worldBuilder = do
 
 main :: IO ()
 main = do
-    let x = execState (runPlainRulebook whenPlayBeginsRulesImpl) (makeWorld 5 worldBuilder)
+    let x = execState (runPlainRulebook whenPlayBeginsRulesImpl) (makeWorld worldBuilder)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
     putStrLn ""

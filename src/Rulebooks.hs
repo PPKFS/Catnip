@@ -21,25 +21,25 @@ import Data.Maybe
 import Data.Foldable
 
 -- | smart constructor for rulebooks. Sets everything to just blank.
-blankRulebook :: Name -> Rulebook obj usr act 
+blankRulebook :: Name -> Rulebook act 
 blankRulebook n = Rulebook { _rulebookName = n, _firstRules = [], _rules = [], _lastRules = [], _defaultOutcome = Nothing}
 
 -- | a rule that does nothing
-blankRule :: WorldRuleState obj usr act
+blankRule :: WorldRuleState act
 blankRule = return Nothing
 
 
-runRuleset :: [Rule obj usr a] -> State (World obj usr, a) RuleOutcome
+runRuleset :: [Rule a] -> State (World , a) RuleOutcome
 runRuleset = doUntilJustM (\r -> do
     when ( r ^. ruleName /= "") $ sayDbgModifyLnR ("Following the " `mappend` (r ^. ruleName));
     r ^. ruleProcessor)
 
 
 -- run some rulebook, that is expecting no additional information,
-runPlainRulebook :: PlainRulebook obj usr -> State (World obj usr) RuleOutcome
+runPlainRulebook :: PlainRulebook -> State (World ) RuleOutcome
 runPlainRulebook r = zoomOut (runRulebook r) ()
 
-runRulebook :: Rulebook obj usr a -> State (World obj usr, a) RuleOutcome
+runRulebook :: Rulebook a -> State (World , a) RuleOutcome
 runRulebook r = do
     --print out some debug text if relevant
     zoom _1 (indentDbg True)
@@ -48,17 +48,17 @@ runRulebook r = do
     result <- doUntilJustM runRuleset [r ^. firstRules, r ^. rules, r ^. lastRules]
     return $ if' (isNothing result) (r ^. defaultOutcome) result
 
-runRulebookMaybe :: Maybe (Rulebook obj usr a) -> State (World obj usr, a) RuleOutcome
+runRulebookMaybe :: Maybe (Rulebook a) -> State (World , a) RuleOutcome
 runRulebookMaybe Nothing = return Nothing
 runRulebookMaybe (Just r) = runRulebook r
 
 -- | more constructors of not much
-makeActivity :: Name -> [Rule obj usr (ActionData a)] -> Action obj usr a
+makeActivity :: Name -> [Rule (ActionData a)] -> Action a
 makeActivity name rules = Action { _actionName = name, _checkRules = Nothing, _reportRules = Nothing,
     _actionInfo = blankActionData, _setActionVariables = Nothing, _carryOutRules = (blankRulebook name) 
     { _rules = rules }}
 
-setActionVars :: (World obj usr, Action obj usr act) -> (World obj usr, Action obj usr act)
+setActionVars :: (World , Action act) -> (World , Action act)
 setActionVars (w, a) = case setVar of
         Nothing -> (w, a)
         Just b -> (w, a { _actionInfo = b w actionI })
@@ -67,7 +67,7 @@ setActionVars (w, a) = case setVar of
 
 -- | the main action processing rulebook. though I guess with haskell's laziness and everything,
 -- it's more of a function that doesn't take any parameters?
-actionProcessingRules :: Rulebook obj usr (Action obj usr act)
+actionProcessingRules :: Rulebook (Action act)
 actionProcessingRules = (blankRulebook "action processing rulebook") {
     _firstRules = 
         [
@@ -94,7 +94,7 @@ actionProcessingRules = (blankRulebook "action processing rulebook") {
             Rule "end action processing in success rule" (return $ Just True)
         ]}
 
-specificActionProcessingRules :: Rulebook obj usr (Action obj usr act)
+specificActionProcessingRules :: Rulebook (Action act)
 specificActionProcessingRules = (blankRulebook "descend to specific action processing rulebook") {
     _rules = [
         Rule "investigate player's awareness before action rule" blankRule,
@@ -115,10 +115,10 @@ specificActionProcessingRules = (blankRulebook "descend to specific action proce
             ]}
 
 -- R functions operate within a rulebook; so they have (World, something) sigs
-runActivityR :: Action obj usr a -> State (World obj usr, b) RuleOutcome
+runActivityR :: Action a -> State (World , b) RuleOutcome
 runActivityR a = zoom _1 (runActivity a)
 
-runActivity :: Action obj usr a -> State (World obj usr) RuleOutcome
+runActivity :: Action a -> State (World ) RuleOutcome
 runActivity a = do
     zoomOut (do
         modify setActionVars
@@ -130,16 +130,16 @@ runActivity a = do
 -- | if we begin an activity, we do not do statewise stuff
 -- because we instead want to return the activity which complains with the context
 -- it's being run in.
-beginActivity :: Action obj usr act -> World obj usr -> (RuleOutcome, (World obj usr, Action obj usr act))
+beginActivity :: Action act -> World -> (RuleOutcome, (World, Action act))
 beginActivity a w = runState x (w, a) where
     x = undefined --processActionIfExists (a ^. checkRules)
 
-beginActivityIf :: Bool -> Action obj usr act -> World obj usr -> (World obj usr, Action obj usr act)
+beginActivityIf :: Bool -> Action act -> World -> (World, Action act)
 beginActivityIf cond act w = if cond
     then (let (_, x) = beginActivity act w in x)
     else (w, act)
 
 -- | ending an activity just gives us the World usr obj act , we don't care about the outcome
-endActivity :: Action obj usr act -> World obj usr -> World obj usr
+endActivity :: Action act -> World -> World 
 endActivity a w = fst $ execState x (w, a) where
     x = undefined -- processActionIfExists (a ^. checkRules)

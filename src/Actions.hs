@@ -17,36 +17,36 @@ import SayCommon
 import Data.Text.Prettyprint.Doc.Render.Terminal
 import Data.Maybe
 
-tryAction :: Action obj usr act -> State (World obj usr) ActionOutcome
+tryAction :: Action act -> State (World ) ActionOutcome
 tryAction ac = do
     sayDbgModifyLn ("Trying to do the " <> (ac ^. actionName) <> " action")
     w <- get
     x <- zoomOut (runRulebook actionProcessingRules) (ac & (actionInfo . currentActor) .~ (w ^. player))
     return $ fromMaybe True x
 
-printName :: Object obj -> State (World obj usr) RuleOutcome
+printName :: Object -> State (World ) RuleOutcome
 printName o = printNameExtended o defaultStyle
 
-printNameR :: Object obj -> State (World obj usr, b) RuleOutcome
+printNameR :: Object -> State (World , b) RuleOutcome
 printNameR o = zoom _1 (printName o)
 
-printNameExtended :: Object obj -> NameStyle -> State (World obj usr) RuleOutcome
+printNameExtended :: Object -> NameStyle -> State (World ) RuleOutcome
 printNameExtended obj s = do
     w <- get
     runActivity ((w ^. std . activities . printingNameActivity) obj s)
 
-printNameExtendedR :: Object obj -> NameStyle -> State (World obj usr, b) RuleOutcome
+printNameExtendedR :: Object -> NameStyle -> State (World , b) RuleOutcome
 printNameExtendedR obj s = zoom _1 (printNameExtended obj s)
 -- LOOKING --
 -- consists of looking and all the activities naturally associated with looking
 -- mostly that's printing out room
 
---move :: HasLocation x => x -> ID -> State (World obj usr) ()
+--move :: HasLocation x => x -> ID -> State (World ) ()
 --move thingToMove newLoc = do sayModifyLn $ "hello" <> newLoc
 
     --do
    -- world <- getWorld
-   -- let world2 = world :: World obj usr
+   -- let world2 = world :: World 
     --let currLoc = getLocation thingToMove
     --let currLocID = currLoc ^. objID
     --let newLoc = currLoc & contains %~ (delete currLocID)
@@ -56,7 +56,7 @@ printNameExtendedR obj s = zoom _1 (printNameExtended obj s)
     --add it to the new location
     --set it to the new location too
 
-printingNameActivityImpl :: Object obj -> NameStyle -> Action obj usr ()
+printingNameActivityImpl :: Object -> NameStyle -> Action ()
 printingNameActivityImpl obj _ = (makeActivity "printing the name of something activity" []){
     _carryOutRules = (blankRulebook "") {
         _lastRules = [ Rule "standard name printing rule" (do
@@ -67,26 +67,26 @@ printingNameActivityImpl obj _ = (makeActivity "printing the name of something a
     }
 }
 
-printingDarkRoomNameActivityImpl :: Action obj usr ()
+printingDarkRoomNameActivityImpl :: Action ()
 printingDarkRoomNameActivityImpl = makeActivity "printing the name of a dark room activity" [
         anonRule (do 
             sayModifyLnR "Darkness"
             return Nothing)]
 
-printingDarkRoomDescriptionActivityImpl :: Action obj usr ()
+printingDarkRoomDescriptionActivityImpl :: Action ()
 printingDarkRoomDescriptionActivityImpl = makeActivity "printing the description of a dark room activity" [
         anonRule (do 
             sayModifyLnR "It is pitch dark, and you can't see a thing."
             return Nothing)]
 
-lookingSetActionVariablesRules :: RoomDescriptionSetting -> World obj usr -> ActionData LookingActionVariables -> 
+lookingSetActionVariablesRules :: RoomDescriptionSetting -> World -> ActionData LookingActionVariables -> 
     ActionData LookingActionVariables
 lookingSetActionVariablesRules r w = set (actionVariables . roomDescriptionSetting) r
 
 getVisibilityLevelCount :: ActionData LookingActionVariables -> Int
 getVisibilityLevelCount = view $ actionVariables . visibilityLvlCnt
 
-lookingCarryOutRules :: HasLocation obj => Rulebook obj usr (ActionData LookingActionVariables)
+lookingCarryOutRules :: Rulebook (ActionData LookingActionVariables)
 lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
     _rules = [
         Rule "room description heading rule" (do 
@@ -135,7 +135,7 @@ lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
     ]
 }
 
-lookingActionImpl :: HasLocation obj => Action obj usr LookingActionVariables
+lookingActionImpl :: Action LookingActionVariables
 lookingActionImpl = Action
     {
         _actionName = "looking",
@@ -153,7 +153,7 @@ lookingActionImpl = Action
         _setActionVariables = Just $ lookingSetActionVariablesRules NormalDescriptions
     }
 
-introText :: State (World obj usr) ()
+introText :: State (World ) ()
 introText = do
     w <- get
     let shortBorder = "------" :: T.Text
@@ -170,7 +170,7 @@ introText = do
 
 -- | the when play begins rulebook is mostly identical to the beginning rulebook
 -- in inform, plus minus a few random implementation specific bits.
-whenPlayBeginsRulesImpl :: HasLocation obj => PlainRulebook obj usr
+whenPlayBeginsRulesImpl :: PlainRulebook 
 whenPlayBeginsRulesImpl = (blankRulebook "when play begins rulebook") {
     _firstRules = 
         [
