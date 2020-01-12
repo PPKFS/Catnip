@@ -13,11 +13,9 @@ import Objects
 import Rulebooks
 import Types
 import Utils
-import qualified Data.Map.Strict as Map
 import SayCommon
 import Data.Text.Prettyprint.Doc.Render.Terminal
 import Data.Maybe
-import Control.Applicative
 
 tryAction :: Action obj usr act -> State (World obj usr) ActionOutcome
 tryAction ac = do
@@ -27,18 +25,18 @@ tryAction ac = do
     return $ fromMaybe True x
 
 printName :: Object obj -> State (World obj usr) RuleOutcome
-printName op = printNameExtended op defaultStyle
+printName o = printNameExtended o defaultStyle
 
 printNameR :: Object obj -> State (World obj usr, b) RuleOutcome
-printNameR op = zoom _1 (printName op)
+printNameR o = zoom _1 (printName o)
 
 printNameExtended :: Object obj -> NameStyle -> State (World obj usr) RuleOutcome
-printNameExtended op s = do
+printNameExtended obj s = do
     w <- get
-    runActivity ((w ^. std . activities . printingNameActivity) op s)
+    runActivity ((w ^. std . activities . printingNameActivity) obj s)
 
 printNameExtendedR :: Object obj -> NameStyle -> State (World obj usr, b) RuleOutcome
-printNameExtendedR op s = zoom _1 (printNameExtended op s)
+printNameExtendedR obj s = zoom _1 (printNameExtended obj s)
 -- LOOKING --
 -- consists of looking and all the activities naturally associated with looking
 -- mostly that's printing out room
@@ -59,10 +57,10 @@ printNameExtendedR op s = zoom _1 (printNameExtended op s)
     --set it to the new location too
 
 printingNameActivityImpl :: Object obj -> NameStyle -> Action obj usr ()
-printingNameActivityImpl obj sty = (makeActivity "printing the name of something activity" []){
+printingNameActivityImpl obj _ = (makeActivity "printing the name of something activity" []){
     _carryOutRules = (blankRulebook "") {
         _lastRules = [ Rule "standard name printing rule" (do
-            sayModifyLn $ obj ^. name
+            sayModifyLnR $ obj ^. name
             return Nothing
             )
         ]
@@ -72,7 +70,7 @@ printingNameActivityImpl obj sty = (makeActivity "printing the name of something
 printingDarkRoomNameActivityImpl :: Action obj usr ()
 printingDarkRoomNameActivityImpl = makeActivity "printing the name of a dark room activity" [
         anonRule (do 
-            sayModifyLn "Darkness"
+            sayModifyLnR "Darkness"
             return Nothing)]
 
 lookingSetActionVariablesRules :: World obj usr -> LookingActionVariables
@@ -88,22 +86,19 @@ lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
             -- otherwise, we just print the name of the room.
             -- cut off bold type, then iterate all levels of visibility holders (supporters, etc)
             -- and append them.
-            modifyWorld $ setStyle (Just bold)
+            modifyR $ setStyle (Just bold)
             (w, a) <- get
             let loc = getLocation w (a ^. currentActor)
-            if' ((a ^. actionVariables . visibilityLvlCnt) == 1)
+            _ <- if' ((a ^. actionVariables . visibilityLvlCnt) == 1)
                 (runActivityR (w ^. std . activities . printingDarkRoomNameActivity))
                 $ if' ((a ^. actionVariables . visibilityCeiling) == (loc ^. objID))
                     (printNameR loc)
                     (printNameExtendedR loc (NameStyle Capitalised Definite))
-            modifyWorld $ setStyle Nothing
+            modifyR $ setStyle Nothing
             return Nothing
             ),
 
-        Rule "room description body rule" (do 
-            (w, a) <- get
-            return Nothing
-            )
+        Rule "room description body rule" (return Nothing)
         --Rule "room description paragraphs aboutects rule" desc_obj_rule,
         --Rule "check new arrival rule" check_arrival_rule
     ]
@@ -122,11 +117,12 @@ lookingActionImpl = Action
                 _abbrevFormAllowed = False,
                 _visibilityLvlCnt = 0,
                 _visibilityCeiling = ""
-            }}
+            }},
+        _setActionVariables = Nothing
     }
 
-introText :: World obj usr -> World obj usr
-introText = execState (do
+introText :: State (World obj usr) ()
+introText = do
     w <- get
     let shortBorder = "------" :: T.Text
         totalLength = 2 * T.length shortBorder + T.length (w ^. title) + 2 :: Int
@@ -138,7 +134,7 @@ introText = execState (do
     modify $ sayLn longBorder
     modify $ sayLn "\n"
     modify $ setStyle Nothing
-    return w)
+    return ()
 
 -- | the when play begins rulebook is mostly identical to the beginning rulebook
 -- in inform, plus minus a few random implementation specific bits.
@@ -147,7 +143,7 @@ whenPlayBeginsRulesImpl = (blankRulebook "when play begins rulebook") {
     _firstRules = 
         [
             Rule "display banner rule" (do
-                modifyWorld introText
+                zoom _1 introText
                 return Nothing),
             Rule "position player in model world rule" (do
                 zoom _1 (do
@@ -157,7 +153,7 @@ whenPlayBeginsRulesImpl = (blankRulebook "when play begins rulebook") {
                 return Nothing),
             -- | do looking.
             Rule "initial room description rule" (do 
-                zoom _1 $ do { w <- get ; tryAction (w ^. std . actions . lookingAction)}
+                _ <- zoom _1 $ do { w <- get ; tryAction (w ^. std . actions . lookingAction)}
                 return Nothing)
         ]
 }

@@ -42,9 +42,7 @@ runPlainRulebook r = zoomOut (runRulebook r) ()
 runRulebook :: Rulebook obj usr a -> State (World obj usr, a) RuleOutcome
 runRulebook r = do
     --print out some debug text if relevant
-    zoom _1 (do
-        w <- get
-        put $ indentDbg w True)
+    zoom _1 (indentDbg True)
     when (r ^. rulebookName /= "") $ sayDbgModifyLnR ("Following the " <> (r ^. rulebookName))
     --run our ruleset
     result <- doUntilJustM runRuleset [r ^. firstRules, r ^. rules, r ^. lastRules]

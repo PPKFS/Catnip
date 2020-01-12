@@ -19,9 +19,10 @@ import Data.Text.Prettyprint.Doc.Render.Terminal
 import Utils
 import Lens.Family.Total
 import Data.Set
+import Data.List.Lens
 
-baseWorld :: HasLocation obj => World obj usr
-baseWorld = World
+baseWorld :: HasLocation obj => usr -> World obj usr
+baseWorld u = World
     {
         _directions = constructDirections,
         _rooms = empty,
@@ -35,7 +36,8 @@ baseWorld = World
             (nowhereRoom ^. objID, nowhereRoom)],
         _player = "PLAYER",
         _nextObjID = "0",
-        _firstRoom = "NA"
+        _firstRoom = "NA",
+        _usrLibrary = u
     }
 
 constructRulebooks :: HasLocation obj => RulebookCollection obj usr
@@ -75,7 +77,7 @@ generateID :: State (WorldBuilder obj usr) ID
 generateID = do
     (w, _) <- get
     let newID = read (T.unpack $ w ^. nextObjID) :: Integer
-    modifyWorld (\w -> w { _nextObjID = T.pack $ show (newID+1)})
+    modifyR (\w -> w { _nextObjID = T.pack $ show (newID+1)})
     return $ w ^. nextObjID
 
 addObject :: (ID -> Object obj) -> State (WorldBuilder obj usr) ID
@@ -97,8 +99,30 @@ addRoom obj = do
     _2 . currentRoom .=  newID
     return newID
 
-verifyWorld :: World obj usr -> Either (World obj usr) ()
-verifyWorld = Left
+addRule :: T.Text -> Rule obj usr () -> State (WorldBuilder obj usr) ()
+addRule _ r = _1 . std . rulebooks . whenPlayBeginsRules . firstRules . _tail <>= [r]
 
-makeWorld :: HasLocation obj => State (WorldBuilder obj usr) ID -> Either (World obj usr) ()
-makeWorld s = verifyWorld $ fst $ execState s (baseWorld, ConstructInfo { _currentRoom = "NA", _currentObject = "NA"})
+setTitle :: T.Text -> State (WorldBuilder obj usr) ()
+setTitle t = _1 . title .= t
+
+run :: World obj usr -> World obj usr
+run w = execState (runPlainRulebook $ w ^. std . rulebooks . whenPlayBeginsRules) w
+
+flushMsgBuffer :: World obj usr -> IO (World obj usr)
+flushMsgBuffer x = do
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
+    return x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}}
+
+headerLength :: Int
+headerLength = 5
+
+flushToString :: World obj usr -> IO (T.Text, World obj usr)
+flushToString x = do
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
+    putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
+    let outputStr = renderStrict $ layoutCompact $ fillCat $ Prelude.drop headerLength $ reverse (x ^. msgBuffer . stdBuffer)
+    return (T.replace "\n" "" outputStr, x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}})
+
+makeWorld :: HasLocation obj => usr -> State (WorldBuilder obj usr) ID -> World obj usr
+makeWorld u s = fst $ execState s (baseWorld u, ConstructInfo { _currentRoom = "NA", _currentObject = "NA"})

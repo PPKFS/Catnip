@@ -11,20 +11,9 @@ if' True  x _ = x
 if' False _ y = y
 
 -- | a simpler way to call modify for states on tuples
--- for instance, this could be generic-ly written if needed
-modifyWorld :: (a -> a) -> State (a, b) ()
-modifyWorld f = modify (\(w, a) -> (f w, a))
-
-modifyWorld2 :: (a -> a) -> State a ()
-modifyWorld2 = modify
-
-doUntilJustOld :: [a] -> (a -> State b (Maybe c)) -> State b (Maybe c)
-doUntilJustOld [] _ = return Nothing
-doUntilJust (x:xs) f = do
-    y <- f x
-    case y of
-        Just _ -> return y
-        Nothing -> doUntilJust xs f
+-- TODO: find how to rewrite this with zoom
+modifyR :: (a -> a) -> State (a, b) ()
+modifyR f = modify (\(w, a) -> (f w, a))
 
 -- | black magic. do a list of things in a monadic instance, taking the first just
 doUntilJustM :: (Foldable t, Monad m) => (a1 -> m (Maybe a2)) -> t a1 -> m (Maybe a2)

@@ -12,10 +12,8 @@ import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Control.Lens
 import Control.Monad.State
-import System.IO
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
-import Lens.Family.Total
 import Data.Set
 
 -- | Everything that can be interacted with is an object.
@@ -222,6 +220,7 @@ makeLenses ''StandardLibrary
 makeLenses ''ActivityCollection
 makeLenses ''RoomData
 makeLenses ''ActionCollection
+makeLenses ''RulebookCollection
 
 -- | some helpful show rules for the debugging
 instance Show (Rule obj usr act) where

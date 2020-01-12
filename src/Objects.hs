@@ -12,9 +12,25 @@ import Control.Lens
 import Types
 import Utils
 import Data.Maybe
+import Control.Monad.State
+import Data.Set
 
 lookupID :: World obj usr -> ID -> Maybe (Object obj)
 lookupID w i = Map.lookup i (w ^. objects)
+
+iterateObjectsWhere :: (Object obj -> State (World obj usr) b) -> (Object obj -> Bool) 
+    -> State (World obj usr) ()
+iterateObjectsWhere f p = do
+    w <- get
+    mapM_ f (Prelude.filter p $ Map.elems (w ^. objects))
+
+iterateNonRooms :: (Object obj -> State (World obj usr) b) -> State (World obj usr) ()
+iterateNonRooms f = do
+    w <- get
+    iterateObjectsWhere f (\x -> not $ member (x ^. objID) (w ^. rooms))
+
+iterateAllObjects :: (Object obj -> State (World obj usr) b) -> State (World obj usr) ()
+iterateAllObjects = flip iterateObjectsWhere (const True)
 
 class HasLocation a where
     getLocation :: HasLocation obj => World obj usr -> a -> LocationObj obj
@@ -46,6 +62,12 @@ makeObject n d i = Object i n ImproperNamed SingularNamed
 
 makeThing :: Name -> Description -> ID -> Object obj
 makeThing n d i = makeObject n d i Thing
+
+makePlainThing :: ID -> Object obj
+makePlainThing = makeThing "" ""
+
+makeThingWithName :: Name -> ID -> Object obj
+makeThingWithName n = makeThing n ""
 
 -- | if we need to make an indefinite article by default
 getIndefiniteArticle :: NameProperness -> NamePlurality -> Char -> T.Text

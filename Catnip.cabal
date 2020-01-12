@@ -27,12 +27,28 @@ source-repository head
 
 library
   exposed-modules:
+    Actions
+    , Objects
+    , Rulebooks
+    , Types
+    , Utils
+    , SayCommon
+    , WorldBuilder
   other-modules:
       Paths_Catnip
   hs-source-dirs:
       src
   build-depends:
     base >=4.7 && <5
+    , text
+    , lens
+    , random
+    , containers
+    , mtl
+    , prettyprinter
+    , prettyprinter-ansi-terminal
+    , total
+    , transformers
   default-language: Haskell2010
 
 executable Catnip-exe
@@ -61,13 +77,14 @@ executable Catnip-exe
     , prettyprinter-ansi-terminal
     , total
     , transformers
+
   default-language: Haskell2010
   extensions:
       TypeApplications
 
 test-suite Catnip-test
   type: exitcode-stdio-1.0
-  main-is: Spec.hs
+  main-is: Tests.hs
   other-modules:
       Paths_Catnip
   hs-source-dirs:
@@ -76,4 +93,15 @@ test-suite Catnip-test
   build-depends:
       Catnip
     , base >=4.7 && <5
+    , HTF
+    , text
+    , lens
+    , random
+    , containers
+    , mtl
+    , prettyprinter
+    , prettyprinter-ansi-terminal
+    , total
+    , transformers
+
   default-language: Haskell2010

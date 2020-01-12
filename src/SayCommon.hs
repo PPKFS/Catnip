@@ -49,22 +49,29 @@ sayDbgModifyLn :: T.Text -> State (World obj usr) ()
 sayDbgModifyLn a = modify (sayDbgLn a)
 
 sayDbgModifyLnR :: T.Text -> WorldUpdate obj usr b ()
-sayDbgModifyLnR a = modifyWorld (sayDbgLn a)
+sayDbgModifyLnR a = modifyR (sayDbgLn a)
 
-indentDbg ::  World obj usr -> Bool ->  World obj usr
-indentDbg w b = w & msgBuffer . indentLvl %~ (+) ((if b then 1 else (-1)) * 4)-- w2 & msgBuffer . stdBuffer %~ ((:) $ (w ^. msgBuffer . indentLvl, line)) where
+indentDbg :: Bool -> State (World obj usr) ()
+indentDbg b = msgBuffer . indentLvl %= (+) ((if b then 1 else (-1)) * 4)
+
+indentDbgR :: Bool -> WorldUpdate obj usr b ()
+indentDbgR b = zoom _1 (indentDbg b)
+
 
 setStyle :: Maybe AnsiStyle ->  World obj usr ->  World obj usr
 setStyle s w = w & msgBuffer . msgStyle .~ s
 -- | same as say, but prebaked to save having to modify sayLn 
 sayModify :: T.Text -> WorldUpdate obj usr b ()
-sayModify a = modifyWorld (say a)
+sayModify a = modifyR(say a)
 
-sayModifyLn :: T.Text -> WorldUpdate obj usr b ()
-sayModifyLn a = modifyWorld (sayLn a)
+sayModifyLnR :: T.Text -> WorldUpdate obj usr b ()
+sayModifyLnR a = modifyR (sayLn a)
+
+sayModifyLn :: T.Text -> State (World obj usr) ()
+sayModifyLn a = modify (sayLn a)
 
 sayModifyFormatted :: Doc AnsiStyle -> WorldUpdate obj usr b ()
-sayModifyFormatted a = modifyWorld (sayInt a)
+sayModifyFormatted a = modifyR (sayInt a)
 
 sayModifyLnFormatted :: Doc AnsiStyle -> WorldUpdate obj usr b ()
-sayModifyLnFormatted a = modifyWorld (sayInt $ a <> line)
+sayModifyLnFormatted a = modifyR (sayInt $ a <> line)
