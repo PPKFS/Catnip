@@ -108,7 +108,7 @@ makeRoom n desc i = makeObject n desc i $ Room (RoomData Unvisited Map.empty Not
 nowhereRoom :: RoomObj obj
 nowhereRoom = makeRoom "Nowhere, The Void, You Screwed Up" 
                 "If you're here, you've messed up something chronic." "0xDEADBEEF" 
-
+                
 globalRegion :: ThingObj obj
 globalRegion = makeObject "global region" "" "0xDEADBEEF" Region
 

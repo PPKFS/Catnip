@@ -72,7 +72,7 @@ data RoomData = RoomData
 data Darkness = Lighted | Dark deriving Show
 data IsVisited = Visited | Unvisited deriving Show
 type Description = T.Text
-type MapConnections = Map.Map String ID
+type MapConnections = Map.Map ID ID
 type ContainingRegion = Maybe ID
 
 -- THINGS --
@@ -114,15 +114,17 @@ data World obj usr = World
         _usrLibrary :: usr,
         _player :: ID,--Object obj,
         _firstRoom :: ID,
-        _nextObjID :: ID
+        _nextObjID :: ID,
+        -- I dunno how relevant this is, but hey ho
+        _theDarknessWitnessed :: Bool
     }
 
 data MessageBuffer = MessageBuffer
     {
-    _indentLvl :: Int,
-    _stdBuffer :: [Doc AnsiStyle],
-    _dbgBuffer :: [Doc AnsiStyle], -- this one is sent to stderr
-    _msgStyle :: Maybe AnsiStyle
+        _indentLvl :: Int,
+        _stdBuffer :: [Doc AnsiStyle],
+        _dbgBuffer :: [Doc AnsiStyle], -- this one is sent to stderr
+        _msgStyle :: Maybe AnsiStyle
     }
 
 -- | the standard library is the equivalent of inform's standard rules.
@@ -187,6 +189,7 @@ type PlainRulebook obj usr = Rulebook obj usr ()
 data ActivityCollection obj usr = ActivityCollection
     {
         _printingDarkRoomNameActivity :: Action obj usr (),
+        _printingDarkRoomDescriptionActivity :: Action obj usr (),
         _printingNameActivity :: Object obj -> NameStyle -> Action obj usr ()
     }
 
@@ -200,12 +203,27 @@ newtype ActionCollection obj usr = ActionCollection
         _lookingAction :: Action obj usr LookingActionVariables 
     }
 
+data RoomDescriptionSetting = NormalDescriptions | BriefDescriptions | VerboseDescriptions deriving (Eq, Show)
+
 data LookingActionVariables = LookingActionVariables
     {
         _roomDescribingAction :: Name,
         _abbrevFormAllowed :: Bool,
         _visibilityLvlCnt :: Int,
-        _visibilityCeiling :: LocationID
+        _visibilityCeiling :: LocationID,
+        _roomDescriptionSetting :: RoomDescriptionSetting,
+        {-
+        This is used when we want a room description with the same abbreviation
+        conventions as after a going action, and we don't quite want a looking
+        action fully to take place. We nevertheless want to be sure that the
+        action variables for looking exist, and in particular, we want to set the
+        "room-describing action" variable to the action which was prevailing
+        when the room description was called for. We also set "abbreviated form
+        allowed" to "true": when the ordinary looking action is running, this
+        is "false".
+        FINALLY found an explanation of this property in microsoft's repo somehow
+        -}
+        _abbreviatedFormAllowed :: Bool
     }
 
 makeLenses ''Rulebook
@@ -221,6 +239,8 @@ makeLenses ''ActivityCollection
 makeLenses ''RoomData
 makeLenses ''ActionCollection
 makeLenses ''RulebookCollection
+
+makePrisms ''ObjectInfo
 
 -- | some helpful show rules for the debugging
 instance Show (Rule obj usr act) where

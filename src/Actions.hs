@@ -73,8 +73,18 @@ printingDarkRoomNameActivityImpl = makeActivity "printing the name of a dark roo
             sayModifyLnR "Darkness"
             return Nothing)]
 
-lookingSetActionVariablesRules :: World obj usr -> LookingActionVariables
-lookingSetActionVariablesRules = undefined
+printingDarkRoomDescriptionActivityImpl :: Action obj usr ()
+printingDarkRoomDescriptionActivityImpl = makeActivity "printing the description of a dark room activity" [
+        anonRule (do 
+            sayModifyLnR "It is pitch dark, and you can't see a thing."
+            return Nothing)]
+
+lookingSetActionVariablesRules :: RoomDescriptionSetting -> World obj usr -> ActionData LookingActionVariables -> 
+    ActionData LookingActionVariables
+lookingSetActionVariablesRules r w = set (actionVariables . roomDescriptionSetting) r
+
+getVisibilityLevelCount :: ActionData LookingActionVariables -> Int
+getVisibilityLevelCount = view $ actionVariables . visibilityLvlCnt
 
 lookingCarryOutRules :: HasLocation obj => Rulebook obj usr (ActionData LookingActionVariables)
 lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
@@ -88,17 +98,38 @@ lookingCarryOutRules = (blankRulebook "looking carry out rulebook") {
             -- and append them.
             modifyR $ setStyle (Just bold)
             (w, a) <- get
+            let visCeiling = a ^. actionVariables . visibilityCeiling
+            let visCnt = getVisibilityLevelCount a
             let loc = getLocation w (a ^. currentActor)
-            _ <- if' ((a ^. actionVariables . visibilityLvlCnt) == 1)
+            _ <- if' (visCnt == 0)
                 (runActivityR (w ^. std . activities . printingDarkRoomNameActivity))
-                $ if' ((a ^. actionVariables . visibilityCeiling) == (loc ^. objID))
+                $ if' (visCeiling == (loc ^. objID))
                     (printNameR loc)
                     (printNameExtendedR loc (NameStyle Capitalised Definite))
             modifyR $ setStyle Nothing
             return Nothing
             ),
 
-        Rule "room description body rule" (return Nothing)
+        Rule "room description body text rule" (do
+            (w, a) <- get
+            let visCount = getVisibilityLevelCount a
+            let loc = getLocationID w (a ^. currentActor)
+            let descSetting = a ^. actionVariables . roomDescriptionSetting
+            -- if we are in darkness, and in brief mode, or normal mode and we are allowed abbreviated form(?)
+            -- and we've seen the darkness before, then do nothing
+            if visCount == 0 then (
+                if descSetting == BriefDescriptions || 
+                    (descSetting == NormalDescriptions && a ^. actionVariables . abbreviatedFormAllowed 
+                        && w ^. theDarknessWitnessed) then return Nothing 
+                else runActivityR (w ^. std . activities . printingDarkRoomDescriptionActivity))
+            else ( -- the vis ceiling is the room, and the various tests pass
+                if (a ^. actionVariables . visibilityCeiling) == loc 
+                    then 
+                        if descSetting == BriefDescriptions || (descSetting == NormalDescriptions 
+                            && a ^. actionVariables . abbreviatedFormAllowed)
+                            then return Nothing else return $ Just False
+                    else return Nothing)
+        )
         --Rule "room description paragraphs aboutects rule" desc_obj_rule,
         --Rule "check new arrival rule" check_arrival_rule
     ]
@@ -115,10 +146,11 @@ lookingActionImpl = Action
             {
                 _roomDescribingAction = "",
                 _abbrevFormAllowed = False,
-                _visibilityLvlCnt = 0,
-                _visibilityCeiling = ""
+                _visibilityLvlCnt = 1,
+                _visibilityCeiling = "",
+                _abbreviatedFormAllowed = False
             }},
-        _setActionVariables = Nothing
+        _setActionVariables = Just $ lookingSetActionVariablesRules NormalDescriptions
     }
 
 introText :: State (World obj usr) ()
@@ -152,7 +184,7 @@ whenPlayBeginsRulesImpl = (blankRulebook "when play begins rulebook") {
                     --move <$> use player <*> use firstRoom)
                 return Nothing),
             -- | do looking.
-            Rule "initial room description rule" (do 
+            Rule "initial room description rule" (do
                 _ <- zoom _1 $ do { w <- get ; tryAction (w ^. std . actions . lookingAction)}
                 return Nothing)
         ]

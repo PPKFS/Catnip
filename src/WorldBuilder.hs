@@ -20,6 +20,8 @@ import Utils
 import Lens.Family.Total
 import Data.Set
 import Data.List.Lens
+import Control.Lens.Extras (is)
+import SayCommon
 
 baseWorld :: HasLocation obj => usr -> World obj usr
 baseWorld u = World
@@ -99,6 +101,25 @@ addRoom obj = do
     _2 . currentRoom .=  newID
     return newID
 
+updateRoomData :: ID -> (RoomData -> RoomData) -> World obj usr -> World obj usr
+updateRoomData r = over (objects . ix r . info . _Room)
+
+positionRoom :: ID -> ID -> ID -> State (WorldBuilder obj usr) ()
+positionRoom r1 dir r2 = zoom _1 (do
+    w <- get
+    let opp = w ^. directions . ix dir . info . _Direction
+    --TODO: make sure neither are the nowhere room.
+    modify $ updateRoomData r1 ((mapConnections . at opp) ?~ r2)
+    modify $ updateRoomData r2 ((mapConnections . at dir) ?~ r1)
+    w <- get
+    sayModifyLn $ T.pack $ show $ w ^. objects . ix r1 . info . _Room . mapConnections
+    return ()
+    )
+
+setRoomDescriptionSettings :: RoomDescriptionSetting -> State (WorldBuilder obj usr) ()
+setRoomDescriptionSettings r = zoom _1 $
+    std . actions . lookingAction . setActionVariables .= Just (lookingSetActionVariablesRules r)
+
 addRule :: T.Text -> Rule obj usr () -> State (WorldBuilder obj usr) ()
 addRule _ r = _1 . std . rulebooks . whenPlayBeginsRules . firstRules . _tail <>= [r]
 
@@ -108,6 +129,23 @@ setTitle t = _1 . title .= t
 run :: World obj usr -> World obj usr
 run w = execState (runPlainRulebook $ w ^. std . rulebooks . whenPlayBeginsRules) w
 
+hackyParse :: T.Text -> State (World obj usr) (Action obj usr a)
+hackyParse x = do
+    w <- get
+    if 5 == 5 then return (w ^. std . actions . lookingAction)
+        else return $ w ^. std . activities . printingDarkRoomNameActivity
+
+runCommand :: T.Text -> State (World obj usr) ()
+runCommand command = do
+    r <- hackyParse command
+    tryAction r
+    return ()
+
+type TestMeWith = [T.Text]
+runActions :: Maybe TestMeWith -> State (World obj usr) ()
+runActions Nothing = return ()
+runActions (Just ac) = mapM_ runCommand ac
+
 flushMsgBuffer :: World obj usr -> IO (World obj usr)
 flushMsgBuffer x = do
     putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
@@ -115,14 +153,14 @@ flushMsgBuffer x = do
     return x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}}
 
 headerLength :: Int
-headerLength = 5
+headerLength = 4
 
 flushToString :: World obj usr -> IO (T.Text, World obj usr)
 flushToString x = do
     putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
     putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
     let outputStr = renderStrict $ layoutCompact $ fillCat $ Prelude.drop headerLength $ reverse (x ^. msgBuffer . stdBuffer)
-    return (T.replace "\n" "" outputStr, x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}})
+    return (T.strip $ T.replace "\n\n" "\n" outputStr, x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}})
 
 makeWorld :: HasLocation obj => usr -> State (WorldBuilder obj usr) ID -> World obj usr
 makeWorld u s = fst $ execState s (baseWorld u, ConstructInfo { _currentRoom = "NA", _currentObject = "NA"})
