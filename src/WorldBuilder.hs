@@ -17,93 +17,144 @@ import System.IO
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 import Utils
-import Lens.Family.Total
 import Data.Set
 import Data.List.Lens
 import Control.Lens.Extras (is)
 import SayCommon
+import Control.Monad.Trans.Reader
 
-baseWorld :: World
-baseWorld = World
+emptyWorld :: World
+emptyWorld = World
     {
-        _directions = constructDirections,
-        _rooms = empty,
+        _directions = undefined,
+        _rooms = Map.empty,
         _title = "Untitled Goose Game",
         _msgBuffer = MessageBuffer { _indentLvl = 0, _stdBuffer = [], _dbgBuffer = [], _msgStyle = Nothing },
-        _std = StandardLibrary {
-            _activities = constructActivities,
-            _actions = constructActions,
-            _rulebooks = constructRulebooks},
-        _objects = Map.fromList [("PLAYER", makeThing "yourself" "it's you." "PLAYER"), 
-            (nowhereRoom ^. objID, nowhereRoom)],
+        _objects = Map.empty,
         _player = "PLAYER",
         _nextObjID = "0",
-        _firstRoom = "NA"
-        --_usrLibrary = u
+        _firstRoom = "NA",
+        _theDarknessWitnessed = False
     }
+makePlayer :: Object
+makePlayer = makeThing "yourself" "it's you." "PLAYER"
 
-constructRulebooks ::  RulebookCollection 
-constructRulebooks = RulebookCollection
-    {
-        _whenPlayBeginsRules = whenPlayBeginsRulesImpl
-    }
-
-constructActivities ::  ActivityCollection 
-constructActivities = ActivityCollection
-    {
-        _printingDarkRoomNameActivity = printingDarkRoomNameActivityImpl,
-        _printingNameActivity = printingNameActivityImpl
-    }
-
-constructActions :: ActionCollection 
-constructActions = ActionCollection
-    {
-        _lookingAction = lookingActionImpl
-    }
+initWorld :: World -> World
+initWorld w = w & (objects . at (w ^. player)) ?~ makePlayer
 
 data ConstructInfo = ConstructInfo {
     _currentRoom :: ID,
     _currentObject :: ID
 }
 
+data WorldBuilder w r = WorldBuilder
+    {
+        _worldUnderConstruction :: w,
+        _rulesUnderConstruction :: r,
+        _constructInfo :: ConstructInfo
+    }
+
+type ConstructObject = ID -> Object
+
 makeLenses ''ConstructInfo
+makeLenses ''WorldBuilder
 
-fromLeft :: Either a b -> a
-fromLeft (Left a) = a
+instance HasWorld w => HasWorld (WorldBuilder w r) where
+    world = worldUnderConstruction . world
 
-type ConstructObject obj = ID -> Object
-
-type WorldBuilder = (World , ConstructInfo)
-
-generateID :: State (WorldBuilder ) ID
+generateID :: HasWorld w => State w ID
 generateID = do
-    (w, _) <- get
-    let newID = read (T.unpack $ w ^. nextObjID) :: Integer
-    modifyR (\w -> w { _nextObjID = T.pack $ show (newID+1)})
+    w <- get
+    let newID = read (T.unpack $ w ^. world . nextObjID) :: Integer
+    world . nextObjID .= T.pack (show (newID+1))
     return $ w ^. nextObjID
 
-addObject :: (ID -> Object) -> State (WorldBuilder ) ID
+addObject :: HasWorld w => ConstructObject -> State (WorldBuilder w r) ID
 addObject obj = do
     newID <- generateID
     let newObj = obj newID
-    _1 . objects . at newID ?= newObj
-    _2 . currentObject .= newID
+    world . objects . at newID ?= newObj
+    constructInfo . currentObject .= newID
     return newID
 
-addRoom :: (ID -> RoomObj) -> State (WorldBuilder ) ID
+addRoom :: HasWorld w => (ID -> (Object, RoomData)) -> State (WorldBuilder w r) ID
 addRoom obj = do
     newID <- generateID
     let newObj = obj newID
-    _1 . rooms %= insert newID
-    _1 . objects . at newID ?= newObj
-    (w, _) <- get
-    when ((w ^. firstRoom) == "NA") $ _1 . firstRoom .= newID
-    _2 . currentRoom .=  newID
+    world . rooms . at newID ?= snd newObj
+    world . objects . at newID ?= fst newObj
+    w <- get
+    when ((w ^. world . firstRoom) == "NA") $ world . firstRoom .= newID
+    constructInfo . currentRoom .=  newID
     return newID
 
-updateRoomData :: ID -> (RoomData -> RoomData) -> World -> World 
-updateRoomData r = over (objects . ix r . info . _Room)
+setTitle :: HasWorld w => T.Text -> State (WorldBuilder w r) ()
+setTitle t = world . title .= t
 
+emptyWorldBuilder :: (HasWorld w, HasWorldRules r w) => (World -> w) -> (WorldRules World -> r) -> WorldBuilder w r
+emptyWorldBuilder f r = WorldBuilder (f $ initWorld emptyWorld) (r emptyRules) (ConstructInfo { _currentRoom = "NA", _currentObject = "NA"})
+
+makeWorld :: (HasWorld w, HasWorldRules r w) => (World -> w) -> (WorldRules World -> r) -> State (WorldBuilder w r) b -> (w, r)
+makeWorld worldEmbed rulesEmbed s = (view worldUnderConstruction x, view rulesUnderConstruction x)
+    where x = execState s (emptyWorldBuilder worldEmbed rulesEmbed)
+
+run :: (HasWorld w, HasWorldRules r w) => r -> State w ()
+run r = do
+    runPlainRulebook (r ^. worldRules . rulebooks . whenPlayBeginsRules) r
+    return ()
+    --runPlainRulebook $ (u ^. universeRules . rulebooks . whenPlayBeginsRules) (u ^. universeRules . ruleSet) (u ^. universeWorld)
+
+emptyRules :: WorldRules World
+emptyRules = WorldRules
+    {
+        _actions = constructActions,
+        _rulebooks = constructRulebooks,
+        _activities = constructActivities
+    }
+
+constructRulebooks :: HasWorld w => RulebookCollection w
+constructRulebooks = RulebookCollection
+    {
+        _whenPlayBeginsRules = whenPlayBeginsRulesImpl
+    }
+
+constructActions :: HasWorld w => ActionCollection w
+constructActions = ActionCollection
+    {
+        _lookingAction = lookingActionImpl
+    }
+
+flushMsgBuffer :: HasWorld w => w -> IO w
+flushMsgBuffer x = do
+    putDoc $ fillCat $ reverse (x ^. world . msgBuffer . dbgBuffer)
+    putDoc $ fillCat $ reverse (x ^. world . msgBuffer . stdBuffer)
+    return x --{ _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}}
+
+headerLength :: Int
+headerLength = 4
+
+flushToString :: HasWorld w => w -> IO (T.Text, w)
+flushToString x = do
+    putDoc $ fillCat $ reverse (x ^. world . msgBuffer . dbgBuffer)
+    putDoc $ fillCat $ reverse (x ^. world . msgBuffer . stdBuffer)
+    let outputStr = renderStrict $ layoutCompact $ fillCat $ Prelude.drop headerLength $ reverse (x ^. msgBuffer . stdBuffer)
+    return (T.strip $ T.replace "\n\n" "\n" outputStr, x)
+        --x . world . msgBuffer .~ ((x ^. world . msgBuffer) { _stdBuffer = [], _dbgBuffer = []}))
+
+constructActivities :: HasWorld w => ActivityCollection w
+constructActivities = ActivityCollection
+    {
+        _printingDarkRoomNameActivity = printingDarkRoomNameActivityImpl,
+        _printingDarkRoomDescriptionActivity = printingDarkRoomDescriptionActivityImpl,
+        _printingNameActivity = printingNameActivityImpl
+    }
+
+addRule :: (HasWorld w, HasWorldRules r w) => Rule w () -> State (WorldBuilder w r) ()
+addRule r = rulesUnderConstruction . rulebooks . whenPlayBeginsRules . firstRules . _tail <>= [r]
+{-
+--updateRoomData :: ID -> (RoomData -> RoomData) -> World -> World 
+--updateRoomData r = over (objects . ix r . info . _Room)
+{-
 positionRoom :: ID -> ID -> ID -> State (WorldBuilder ) ()
 positionRoom r1 dir r2 = zoom _1 (do
     w <- get
@@ -119,17 +170,9 @@ positionRoom r1 dir r2 = zoom _1 (do
 setRoomDescriptionSettings :: RoomDescriptionSetting -> State (WorldBuilder ) ()
 setRoomDescriptionSettings r = zoom _1 $
     std . actions . lookingAction . setActionVariables .= Just (lookingSetActionVariablesRules r)
+-}
 
-addRule :: T.Text -> Rule () -> State (WorldBuilder ) ()
-addRule _ r = _1 . std . rulebooks . whenPlayBeginsRules . firstRules . _tail <>= [r]
-
-setTitle :: T.Text -> State (WorldBuilder ) ()
-setTitle t = _1 . title .= t
-
-run :: World -> World 
-run w = execState (runPlainRulebook $ w ^. std . rulebooks . whenPlayBeginsRules) w
-
-hackyParse :: T.Text -> State (World ) (Action a)
+hackyParse :: T.Text -> State w (Action w a)
 hackyParse x = do
     w <- get
     undefined
@@ -147,21 +190,4 @@ runActions :: Maybe TestMeWith -> State (World ) ()
 runActions Nothing = return ()
 runActions (Just ac) = mapM_ runCommand ac
 
-flushMsgBuffer :: World -> IO (World )
-flushMsgBuffer x = do
-    putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
-    putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
-    return x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}}
-
-headerLength :: Int
-headerLength = 4
-
-flushToString :: World -> IO (T.Text, World )
-flushToString x = do
-    putDoc $ fillCat $ reverse (x ^. msgBuffer . dbgBuffer)
-    putDoc $ fillCat $ reverse (x ^. msgBuffer . stdBuffer)
-    let outputStr = renderStrict $ layoutCompact $ fillCat $ Prelude.drop headerLength $ reverse (x ^. msgBuffer . stdBuffer)
-    return (T.strip $ T.replace "\n\n" "\n" outputStr, x { _msgBuffer = (x ^. msgBuffer) { _stdBuffer = [], _dbgBuffer = []}})
-
-makeWorld :: State (WorldBuilder ) ID -> World 
-makeWorld s = fst $ execState s (baseWorld, ConstructInfo { _currentRoom = "NA", _currentObject = "NA"})
+-}

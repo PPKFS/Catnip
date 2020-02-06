@@ -1,16 +1,15 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts #-}
 
 module SayCommon where
 
-import Types
+import           Control.Lens
+import           Control.Monad.State
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc
-import Data.Text.Prettyprint.Doc.Render.Terminal
-import Control.Lens
-import Control.Monad.State
-import Utils
-import System.IO
+import           Data.Text.Prettyprint.Doc
+import           Data.Text.Prettyprint.Doc.Render.Terminal
+import           System.IO
+import           Types
+import           Utils
 
 
 defaultStyle :: NameStyle
@@ -18,60 +17,42 @@ defaultStyle = NameStyle Capitalised Definite
 
 -- | so this is the internals of the say method; applies whatever is said to the end
 -- of the buffer of standard input and annotates if needed.
-sayInt :: Doc AnsiStyle -> World ->  World
-sayInt a w = w & msgBuffer . stdBuffer %~ ((:) $ apl a)
-                where apl = case w ^. msgBuffer . msgStyle of
-                        Nothing -> id
-                        Just x -> annotate x
+sayInternal :: (HasWorld x) => Doc AnsiStyle -> x -> x
+sayInternal a w = w & world . msgBuffer . stdBuffer %~ (:) (apl a)
+                where apl = maybe id annotate (w ^. msgBuffer . msgStyle)
 
-say :: T.Text ->  World ->  World 
-say a = sayInt (pretty a)
+say :: (HasWorld x) => T.Text -> x -> x
+say a = sayInternal (pretty a)
 
-sayLn :: T.Text ->  World ->  World 
-sayLn a = sayInt (pretty a <> line)
+sayLn :: (HasWorld x) => T.Text -> x -> x
+sayLn a = sayInternal (pretty a <> line)
 
-sayDbgInt :: Doc AnsiStyle ->  World ->  World 
-sayDbgInt a w = w & msgBuffer . dbgBuffer %~ (:) (pretty (T.replicate (w ^. msgBuffer . indentLvl) " ") <> a)
-                where apl = case w ^. msgBuffer . msgStyle of
-                                Nothing -> id
-                                Just x -> annotate x
-
-                                --data Capitalisation = Capital | NotCapital
-                                --data Definitive = Definite | Indefinite
-                                --data PrintingOptions = PrintingOptions Capitalisation Definitive
-sayDbg :: T.Text ->  World ->  World 
+sayDbgInt :: (HasWorld x) => Doc AnsiStyle -> x -> x
+sayDbgInt a w = w & world . msgBuffer . dbgBuffer %~ (:) (pretty (T.replicate (w ^. msgBuffer . indentLvl) " ") <> a)
+                where apl = maybe id annotate (w ^. msgBuffer . msgStyle)
+sayDbg :: (HasWorld x) => T.Text -> x -> x
 sayDbg a = sayDbgInt (pretty a)
 
-sayDbgLn :: T.Text ->  World ->  World 
+sayDbgLn ::  (HasWorld x) => T.Text -> x -> x
 sayDbgLn a = sayDbgInt (pretty a <> line)
 
-sayDbgModifyLn :: T.Text -> State (World) ()
+sayDbgModifyLn :: (HasWorld x) => T.Text -> State x ()
 sayDbgModifyLn a = modify (sayDbgLn a)
 
-sayDbgModifyLnR :: T.Text -> WorldUpdate b ()
-sayDbgModifyLnR a = modifyR (sayDbgLn a)
-
-indentDbg :: Bool -> State (World ) ()
+indentDbg :: (HasWorld x) => Bool -> State x ()
 indentDbg b = msgBuffer . indentLvl %= (+) ((if b then 1 else (-1)) * 4)
 
-indentDbgR :: Bool -> WorldUpdate b ()
-indentDbgR b = zoom _1 (indentDbg b)
-
-
-setStyle :: Maybe AnsiStyle ->  World ->  World 
-setStyle s w = w & msgBuffer . msgStyle .~ s
+setStyle :: (HasWorld x) => Maybe AnsiStyle -> x -> x
+setStyle s w = w & world . msgBuffer . msgStyle .~ s
 -- | same as say, but prebaked to save having to modify sayLn 
-sayModify :: T.Text -> WorldUpdate b ()
-sayModify a = modifyR(say a)
+sayModify :: (HasWorld x) => T.Text -> State x ()
+sayModify a = modify (say a)
 
-sayModifyLnR :: T.Text -> WorldUpdate b ()
-sayModifyLnR a = modifyR (sayLn a)
-
-sayModifyLn :: T.Text -> State (World ) ()
+sayModifyLn :: (HasWorld x) => T.Text -> State x ()
 sayModifyLn a = modify (sayLn a)
 
-sayModifyFormatted :: Doc AnsiStyle -> WorldUpdate b ()
-sayModifyFormatted a = modifyR (sayInt a)
+sayModifyFormatted :: (HasWorld x) => Doc AnsiStyle -> State x ()
+sayModifyFormatted a = modify (sayInternal a)
 
-sayModifyLnFormatted :: Doc AnsiStyle -> WorldUpdate b ()
-sayModifyLnFormatted a = modifyR (sayInt $ a <> line)
+sayModifyLnFormatted :: (HasWorld x) =>  Doc AnsiStyle -> State x ()
+sayModifyLnFormatted a = modify (sayInternal $ a <> line)
