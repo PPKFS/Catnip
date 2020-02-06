@@ -24,7 +24,6 @@ extra-source-files:
 source-repository head
   type: git
   location: https://github.com/githubuser/Catnip
-
 library
   exposed-modules:
     Actions
@@ -42,12 +41,13 @@ library
     base >=4.7 && <5
     , text
     , lens
+    , tasty
+    , tasty-hunit
     , random
     , containers
     , mtl
     , prettyprinter
     , prettyprinter-ansi-terminal
-    , total
     , transformers
   default-language: Haskell2010
 
@@ -75,9 +75,7 @@ executable Catnip-exe
     , mtl
     , prettyprinter
     , prettyprinter-ansi-terminal
-    , total
     , transformers
-
   default-language: Haskell2010
   extensions:
       TypeApplications
@@ -93,7 +91,8 @@ test-suite Catnip-test
   build-depends:
       Catnip
     , base >=4.7 && <5
-    , HTF
+    , tasty
+    , tasty-hunit
     , text
     , lens
     , random
@@ -101,7 +100,6 @@ test-suite Catnip-test
     , mtl
     , prettyprinter
     , prettyprinter-ansi-terminal
-    , total
     , transformers
 
   default-language: Haskell2010

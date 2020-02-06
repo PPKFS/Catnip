@@ -1,0 +1,8 @@
+cradle:
+    stack:
+      - path : "./test"
+        component: "Catnip:test:Catnip-test"
+      - path : "./"
+        component: "Catnip:lib"
+      - path : "./"
+        component: "Catnip:exe:Catnip-exe"
